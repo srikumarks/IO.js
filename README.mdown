@@ -1,15 +1,14 @@
-# IO.js: A library for composeable asynchronous actions #
+# IO.js: A framework for composeable asynchronous actions #
 
-`IO` is a library for managing asynchronous sequencing of actions.  This [infoq
-article] summarizes the state of the art in an interview conducted with the
-creators of the existing libraries for managing asynchronous operations in JS.
-The libraries mentioned are - [Step], [Flow-js], [node-promise], [Async],
-[Async.js], [FuturesJS] and [slide-flow-control]. What stands out is that most
-of them say relatively little on "error management", with even the
-misconception that that is synonymous with exception handling as implemented in
-the language itself. Here is also a [Hacker News thread] discussing Python
-creator Guido van Rossum's objections to a callback based API, based on its
-poor ability to work with exceptions. 
+`IO` is a Javascript library for managing sequencing of asynchronous actions.
+This [infoq article] summarizes the state of the art in an interview conducted
+with the creators of the existing libraries for managing asynchronous
+operations in JS and features interviews with the creators of these libraries -
+[Step], [Flow-js], [node-promise], [Async], [Async.js], [FuturesJS] and
+[slide-flow-control]. What stands out is that most of them say relatively
+little on "error management". Here is also a [Hacker News thread] discussing
+Python creator Guido van Rossum's objections to a callback based API, based on
+its poor ability to work with exceptions. 
 
 [infoq article]: http://www.infoq.com/articles/surviving-asynchronous-programming-in-javascript
 [Hacker News thread]: http://news.ycombinator.com/item?id=3750817
@@ -21,8 +20,8 @@ poor ability to work with exceptions.
 [FuturesJS]: https://github.com/coolaj86/futures
 [slide-flow-control]: https://github.com/isaacs/slide-flow-control
 
-The focus of `IO`, therefore, is to provide a flexible mechanism for sequencing
-operations for -
+The focus of `IO`, therefore, is to provide for flexible error management, in
+particular --
 
 1. Trapping errors and deciding what to do with them,
 2. Recovering from errors and resuming operations,
@@ -30,22 +29,22 @@ operations for -
 4. Showing clearly the scope of control of error handlers that are in effect.
 
 ... and, of course, do the rest of the stuff that the other libraries do fairly 
-well. With regard to efficiency, `IO` takes the view that the tasks that
-you're executing ought to be much more complex than any overheads `IO` might
-add.
+well. 
+
+With regard to efficiency, `IO` takes the view that the tasks that you're
+executing ought to be much more complex than any overheads `IO` might add.
 
 # Core concepts #
 
-`IO`, at its core, is a library for creating "actions", which are sequences of
-potentially asynchronous long running operations, and "running" them, usually
-using `IO.run(input, action)`.
+`IO`, at its core, is a library for creating "actions" and "running" them, usually
+using `IO.run(input, action)`. 
 
 ## Actions ##
 
-As mentioned above, An action is a function that does something, maybe
-asynchronously. Actions are usually created and composed using the various
-functions provided by `IO`, but you can write your own as well. You run an
-action like this -
+An action is a function that does something, possibly asynchronously, and
+chooses what to do next based on what it did. Actions are usually created and
+composed using the various functions provided by `IO`, but you can write your
+own as well. You run an action like this -
 
     IO.run("some input data", action);
 
@@ -90,21 +89,21 @@ using the number of arguments that the function has -
     You'll rarely need this, but this allows you to change orchestrators on the
     fly, start other action sequences using the "current orchestrator",
     whatever that happens to be, tweak the control flow by affecting what comes
-    *after* `success` or `failure`, etc. This is what permits actions to be
-    composed in `IO` and helps separate "what to do" from "when it is being
-    done". If you want to trap the full continuations at any
-    point to do something strange with them, you can use this form directly.
+    before or after `success` and `failure`, etc. This form permits actions to
+    be composed in `IO` and helps separate "what to do" from "when it is being
+    done". If you want to trap the full continuations at any point to do
+    something strange with them, you can use this form.
 
 ## Orchestrators ##
 
 `IO` provides (currently) two ways to run actions --  `IO.run` and `IO.trace`.
-These two facilities in `IO` are provided using "orchestrators", which are
-objects that provide the core sequencing and error handling logic. (You can
-write your own as well.)
+These two correspond to the `IO.Ex` and `IO.Tracer` objects called "orchestrators".
+Orchestrators are used for customizing the execution pipeline. (Note: This is
+still work-in-progress and only some basic functionality is available for
+customization.)
 
 1.  `IO.run(input, action)` will run the action normally, passing the given
-    input object to it. It is an alias for using the plain exception supporting
-    orchestrator `IO.Ex`.
+    input object to it. It is an alias for `IO.Ex`.
 
         IO.run(input, action) = IO.Ex.run(input, action)
 
@@ -119,11 +118,9 @@ write your own as well.)
 
 ## IO.do(actions) ##
 
-Generates an action that makes the result behave as though you were to splice
-the given actions array into the outer actions array. This is useful for 
-writing functions that compose other actions into compound actions and need
-to return that. The result of such functions, in turn, can be composed, which
-is what we're aiming at.
+Makes an action that performs the given actions in the given order, passing
+the output of each action to the next. The resulting compound action can be
+further composed with other actions.
 
     IO.do(a1, a2, ...)
     IO.do([a1, a2, ...])
@@ -139,13 +136,15 @@ to fail.
     IO.try(action, handler)
     IO.try([a1, a2, ...], handler)
 
+    IO.try(IO.log("some action"), IO.log("oops! Here is the error - ", true))
+
 ## IO.alt(actions) ##
 
-Similar to `IO.try`, but slightly different as well. It tries a series of
-actions one by one until it comes to the first one that succeeds. The whole alt
-action is semantically the same as as that succeeding action. All actions
-receive the same input, unlike `IO.try` where the `handler` receives the
-error object of the failed action.
+Short for "alternatives". The actions are tried in sequence and the first one
+to succeed passes its output to what follows the `IO.alt`.  The whole alt
+action is semantically the same as that succeeding action. All actions receive
+the same input, unlike `IO.try` where the `handler` receives the error object
+of the failed action.
 
     IO.alt(a1, a2, ...)
     IO.alt([a1, a2, ...])
@@ -154,14 +153,14 @@ error object of the failed action.
 
 Raises an in-sequence error meant for handling by whatever handlers have been
 setup. The `info` is arbitrary and is just passed along with the error object
-in the `error` field.
+in the `error` field. 
 
     IO.raise("some error object")
 
-## IO.catch(onfail) ##
+## IO.catch(onerror) ##
 
-Sets up a "catch point" for trapping raised errors, useful to implement
-commit-rollback semantics.
+Sets up a "catch point" for trapping errors raised using `IO.raise`.  This is
+useful for implementing commit-rollback semantics. `onerror` is itself an action.
 
 The closest catch point gets to have a go first and can do a variety of things -
 
@@ -189,7 +188,7 @@ The closest catch point gets to have a go first and can do a variety of things -
                   restart("again");
               })
             , IO.log("two")
-            , IO.fail("forever"))
+            , IO.raise("forever"))
         
 
 3.  Take some corrective action and resume from the `raise` point as though it
@@ -209,16 +208,16 @@ The closest catch point gets to have a go first and can do a variety of things -
                 err.resume("YAY!");
               })
             , IO.log("three")
-            , IO.fail("BOMB!")
+            , IO.raise("BOMB!")
             , IO.log("surprise!"))
 
 4.  Do the "rollback" sequence again from the error point. This action is
-    available in the error object and is called as `error.rollback(value)`.
+    available in the error object and is invoked as `error.rollback(value)`.
     The value you pass to the rollback function will usually be the error
     object itself.
 
         IO.catch(function (err, restart, giveup) {
-            // Oh, we figured we can resume!
+            // Oh, we figured we can retry!
             err.rollback(err);
         })
 
@@ -232,17 +231,18 @@ The closest catch point gets to have a go first and can do a variety of things -
             // Note that 'success' and 'failure' are complete
             // actions in themselves and not in the
             // "callback/errback" one-argument style.
+            M.call(some_complex_action, err, success, failure);
         })
 
     
 
 ## IO.fork(actions, progress) ##
 
-Generates an action that starts off all the actions in the given `actions` array
+Makes an action that starts off all the actions in the given `actions` array
 asynchronously. The resultant action will continue only after *all* of these
-actions complete. You can optionally supply a progress function that will be
-called to be notified as and when each of the actions complete. The `progress`
-argument has to be a function of the form -
+actions complete (successfully, or by failing). You can optionally supply a
+progress function that will be called to be notified as and when each of the
+actions complete. The `progress` argument has to be a function of the form -
 
     function (i, done, total) {...}
 
@@ -267,21 +267,21 @@ back again, do this -
 
 ## IO.timeout(ms, action, error) ##
 
-Generates an action that couples the given action with a watchdog timer.
-If the watchdog fires before the action finishes, then the main action sequence
-will be considered to fail and the given `error` object becomes the failure
-object. Note that this is a weak timeout, in the sense that the action is
-not aborted. Only the continuation is aborted.
+Makes an action that couples the given action with a watchdog timer.  If the
+watchdog fires before the action finishes, then the main action sequence will
+be considered to fail and the given `error` object becomes the failure object.
+Note that this is a weak timeout, in the sense that the action is not aborted.
+Only the continuation is aborted.
 
 ## IO.atomic(action) ##
 
-Constructs an action that makes the given action operate atomically.
-In other words, the intermediate steps of the action will always be
-executed in sequence, no matter how many "run" calls you execute.
-If the action takes a long time, all those run calls will accumulate
-at the entry point of this action and will be processed in sequence
-one at a time. This is useful if the intermediate steps contain
-any "open database -> do something -> close database" kind of actions.
+Builds an action that makes the given action operate "atomically".  In other
+words, no matter how many action sequences uses the resultant atomic action,
+there will, at any given time, be at most one running instance of it.  If the
+action takes a long time, all those run calls will accumulate at the entry
+point of this action and will be processed in sequence one at a time. This is
+useful if the intermediate steps contain any "open database -> do something ->
+close database" kind of actions.
 
     IO.atomic(a1, a2, ...)
     IO.atomic([a1, a2, ...])
@@ -290,9 +290,8 @@ any "open database -> do something -> close database" kind of actions.
 ## IO.dynamic(fn) ##
 
 A dynamic action is a an action that is determined by the given function `fn`.
-`fn` will be passed the input at this point this action fires and whatever
-action `fn` returns will be used as the action to run. This action behaves
-as though it were that action from the beginning.
+`fn` will be passed the input at the point this action fires and whatever
+action `fn` returns will be used as the action to run. 
 
     IO.dynamic(function (input) {
         return IO.log("some new action");
@@ -327,9 +326,8 @@ Patterns can be -
         ]);
 
 2.  Object literals. In this case, the input must be an object and the keys
-    provided must all exist in the input, besides the values also pattern
-    matching. The "patterns" in the value can be, again, of any type in this
-    list.
+    provided must all exist in the input and the values must also pattern
+    match. The "patterns" in the value can be, again, of any type in this list.
 
         IO.cond([
             //...
@@ -339,10 +337,10 @@ Patterns can be -
 
 3.  A one argument function whose boolean result decides the success of the
     pattern match. Since functions can't usually be meaningfully compared or
-    pattern matched, this is a useful way to provide customizeable matching
-    support. `IO.cond.true` is a trivial pattern matcher that always succeeds
-    and `IO.cond.false` is one that always fails, which can be used as such
-    matchers.
+    pattern matched against, this is a useful way to provide customizeable
+    matching support. `IO.cond.true` is a trivial pattern matcher that always
+    succeeds and `IO.cond.false` is one that always fails, which can be used as
+    such matchers.
 
         IO.cond([
             //...
@@ -362,11 +360,10 @@ If `inputAlso` is `true`, then the input is also printed using `JSON.stringify`.
 
 ## IO.tap(func) ##
 
-Generates an action that calls `func` in the given `context` object,
-with the input that came into the action, but otherwise doesn't affect
-the flow and the sequence will automatically continue. Notice that
-`func` is not given access to the sequencing object, so it cannot
-affect the sequence, not even by throwing an exception.
+Generates an action that calls `func` with the input that came into the action,
+but otherwise doesn't affect the flow and the sequence will automatically
+continue. Notice that `func` is not given access to the sequencing object, so
+it cannot affect the sequence, not even by throwing an exception.
 
     IO.tap(function (input) {
         document.write("input received");

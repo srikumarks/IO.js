@@ -270,18 +270,20 @@ back again, do this -
 
     IO.spawn(IO.fork([a1, a2, ...]))
 
-## IO.timeout(ms, action, error) ##
+## IO.timeout(ms, action, onerror) ##
 
 Makes an action that couples the given action with a watchdog timer.  If the
 watchdog fires before the action finishes, then the main action sequence will
-be considered to fail and the given `error` object becomes the failure object.
+be considered to fail and the `onerror` action will be run before proceeding to
+fail. The input to the `onerror` action is the whole timeout action itself,
+passed as a zero-argument function, so that it can be restarted if necessary.
 Note that this is a weak timeout, in the sense that the action is not aborted.
 Only the continuation is aborted.
 
 ## IO.atomic(action) ##
 
 Builds an action that makes the given action operate "atomically".  In other
-words, no matter how many action sequences uses the resultant atomic action,
+words, no matter how many action sequences use the resultant atomic action,
 there will, at any given time, be at most one running instance of it.  If the
 action takes a long time, all those run calls will accumulate at the entry
 point of this action and will be processed in sequence one at a time. This is
@@ -294,7 +296,7 @@ close database" kind of actions.
 
 ## IO.dynamic(fn) ##
 
-A dynamic action is a an action that is determined by the given function `fn`.
+A dynamic action is an action that is determined by the given function `fn`.
 `fn` will be passed the input at the point this action fires and whatever
 action `fn` returns will be used as the action to run. 
 
@@ -380,7 +382,7 @@ This generates an action that adds the keys of the supplied input object
 to the input that arrived via the action sequence. This is useful for 
 inserting additional information into the "data stream".
 
-    IO.Ex.run({one: "ek"}, 
+    IO.trace({one: "ek"}, 
         IO.do(IO.log("before", true)
             , IO.add({two: "do"})
             , IO.log("after", true)));
@@ -390,7 +392,7 @@ inserting additional information into the "data stream".
 Similar to `IO.add`, but ignores the input that came in through the
 action sequence and replaces it with the given input object.
 
-    IO.Ex.run({one: "ek"}, 
+    IO.trace({one: "ek"}, 
         IO.do(IO.log("before", true)
             , IO.supply({two: "do"})
             , IO.log("after", true)));

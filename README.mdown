@@ -1,0 +1,446 @@
+# IO.js: A library for composeable asynchronous actions #
+
+`IO` is a library for managing asynchronous sequencing of actions.  This [infoq
+article] summarizes the state of the art in an interview conducted with the
+creators of the existing libraries for managing asynchronous operations in JS.
+The libraries mentioned are - [Step], [Flow-js], [node-promise], [Async],
+[Async.js], [FuturesJS] and [slide-flow-control]. What stands out is that most
+of them say relatively little on "error management", with even the
+misconception that that is synonymous with exception handling as implemented in
+the language itself. Here is also a [Hacker News thread] discussing Python
+creator Guido van Rossum's objections to a callback based API, based on its
+poor ability to work with exceptions. 
+
+[infoq article]: http://www.infoq.com/articles/surviving-asynchronous-programming-in-javascript
+[Hacker News thread]: http://news.ycombinator.com/item?id=3750817
+[Step]: https://github.com/creationix/step
+[Flow-js]: https://github.com/willconant/flow-js
+[node-promise]: https://github.com/kriszyp/node-promise
+[Async]: https://github.com/caolan/async
+[Async.js]: https://github.com/fjakobs/async.js
+[FuturesJS]: https://github.com/coolaj86/futures
+[slide-flow-control]: https://github.com/isaacs/slide-flow-control
+
+The focus of `IO`, therefore, is to provide a flexible mechanism for sequencing
+operations for -
+
+1. Trapping errors and deciding what to do with them,
+2. Recovering from errors and resuming operations,
+3. Managing control flow between error handlers,
+4. Showing clearly the scope of control of error handlers that are in effect.
+
+... and, of course, do the rest of the stuff that the other libraries do fairly 
+well. With regard to efficiency, `IO` takes the view that the tasks that
+you're executing ought to be much more complex than any overheads `IO` might
+add.
+
+# Core concepts #
+
+`IO`, at its core, is a library for creating "actions", which are sequences of
+potentially asynchronous long running operations, and "running" them, usually
+using `IO.run(input, action)`.
+
+## Actions ##
+
+As mentioned above, An action is a function that does something, maybe
+asynchronously. Actions are usually created and composed using the various
+functions provided by `IO`, but you can write your own as well. You run an
+action like this -
+
+    IO.run("some input data", action);
+
+User supplied actions can come in one of four forms. The forms are detected
+using the number of arguments that the function has -
+
+1.  Ordinary functions of the form --
+
+        function (input) { return something; }
+
+    These actions succeed by returning a result which is passed along, or fail
+    by throwing an exception. You shouldn't be using `IO` if you only have
+    actions of this kind. If you want the function to stop the execution, you
+    can return `undefined`.
+
+2.  Pure action of the form --
+
+        function (callback, errback) { ... }
+        
+    This is in the common "callback/errback" style where the callback is a one
+    argument function used for continuing with the output of this action and
+    errback is a one argument function that starts an error processing
+    sequence.
+
+3.  Input processing form --
+
+        function (input, callback, errback) { ... }
+
+    The input flows in at the point the action is executed and `callback` and
+    `errback` are as described above. You'll mostly use the previous form and
+    this form.
+
+4.  Fully customizeable form --
+
+        function (M, input, success, failure) { ...  }
+
+    `M` is the currently active orchestrator, `input` is the input available at
+    the point the action is executed. The most important point to note is this --
+    
+    > `success` and `failure` are also actions **in this form**.
+        
+    You'll rarely need this, but this allows you to change orchestrators on the
+    fly, start other action sequences using the "current orchestrator",
+    whatever that happens to be, tweak the control flow by affecting what comes
+    *after* `success` or `failure`, etc. This is what permits actions to be
+    composed in `IO` and helps separate "what to do" from "when it is being
+    done". If you want to trap the full continuations at any
+    point to do something strange with them, you can use this form directly.
+
+## Orchestrators ##
+
+`IO` provides (currently) two ways to run actions --  `IO.run` and `IO.trace`.
+These two facilities in `IO` are provided using "orchestrators", which are
+objects that provide the core sequencing and error handling logic. (You can
+write your own as well.)
+
+1.  `IO.run(input, action)` will run the action normally, passing the given
+    input object to it. It is an alias for using the plain exception supporting
+    orchestrator `IO.Ex`.
+
+        IO.run(input, action) = IO.Ex.run(input, action)
+
+2.  `IO.trace(input, action)` is semantically the same as `IO.run`, except that
+    it will dump a trace of all the operations in the sequence to
+    `console.log`. It is an alias for the higher order "tracer", which can be
+    applied to other orchestrators.
+
+        IO.trace(input, action) = IO.Tracer(IO.Ex).run(input, action)
+
+# Core actions #
+
+## IO.do(actions) ##
+
+Generates an action that makes the result behave as though you were to splice
+the given actions array into the outer actions array. This is useful for 
+writing functions that compose other actions into compound actions and need
+to return that. The result of such functions, in turn, can be composed, which
+is what we're aiming at.
+
+    IO.do(a1, a2, ...)
+    IO.do([a1, a2, ...])
+
+## IO.try(actions, handler) ##
+
+An action that performs the given actions and if any failure occurs, deems
+the actions to have failed and passes the error to the handler. The handler
+is joined to whatever follows after the try and can therefore continue
+by simply succeeding. If the handler fails, the whole try is considered
+to fail.
+
+    IO.try(action, handler)
+    IO.try([a1, a2, ...], handler)
+
+## IO.alt(actions) ##
+
+Similar to `IO.try`, but slightly different as well. It tries a series of
+actions one by one until it comes to the first one that succeeds. The whole alt
+action is semantically the same as as that succeeding action. All actions
+receive the same input, unlike `IO.try` where the `handler` receives the
+error object of the failed action.
+
+    IO.alt(a1, a2, ...)
+    IO.alt([a1, a2, ...])
+
+## IO.raise(info) ##
+
+Raises an in-sequence error meant for handling by whatever handlers have been
+setup. The `info` is arbitrary and is just passed along with the error object
+in the `error` field.
+
+    IO.raise("some error object")
+
+## IO.catch(onfail) ##
+
+Sets up a "catch point" for trapping raised errors, useful to implement
+commit-rollback semantics.
+
+The closest catch point gets to have a go first and can do a variety of things -
+
+1.  Decide that it cannot handle the error and pass on to catch points "higher
+    up". To do this, the handler must "fail".
+
+        IO.catch(IO.fail)
+        IO.catch(function (err, restart, giveup) {
+            // ...
+            giveup("some reason, maybe?");
+        })
+
+2.  Do something and try the sequence of actions immediately following this
+    catch point once more. This is called a "restart". You can even setup loops
+    this way. To do this, the handler must "succeed".
+
+        IO.catch(function (err, restart, giveup) {
+            // do something
+            restart("new input");
+        })
+
+        // Ex: This does an infinite restart loop.
+        IO.do(IO.log("one")
+            , IO.catch(function (err, restart, giveup) {
+                  restart("again");
+              })
+            , IO.log("two")
+            , IO.fail("forever"))
+        
+
+3.  Take some corrective action and resume from the `raise` point as though it
+    succeeded. This "resume" action is available as the "resume" field of the
+    error object, which you can call like `error.resume(value)` and the given
+    value will be injected there.
+
+        IO.catch(function (err, restart, giveup) {
+            // take corrective action here
+            err.resume("new input");
+        })
+
+        // Ex: 
+        IO.do(IO.log("one")
+            , IO.log("two")
+            , IO.catch(function (err, restart, giveup) {
+                err.resume("YAY!");
+              })
+            , IO.log("three")
+            , IO.fail("BOMB!")
+            , IO.log("surprise!"))
+
+4.  Do the "rollback" sequence again from the error point. This action is
+    available in the error object and is called as `error.rollback(value)`.
+    The value you pass to the rollback function will usually be the error
+    object itself.
+
+        IO.catch(function (err, restart, giveup) {
+            // Oh, we figured we can resume!
+            err.rollback(err);
+        })
+
+
+5.  Deep customization relative to the error point is available through
+    the `success` and `failure` actions stored in the error object. You can
+    use this to, for example, change what happens before or after the `resume`
+    completes, for example, log an error in a database.
+
+        IO.catch(function (M, err, success, failure) {
+            // Note that 'success' and 'failure' are complete
+            // actions in themselves and not in the
+            // "callback/errback" one-argument style.
+        })
+
+    
+
+## IO.fork(actions, progress) ##
+
+Generates an action that starts off all the actions in the given `actions` array
+asynchronously. The resultant action will continue only after *all* of these
+actions complete. You can optionally supply a progress function that will be
+called to be notified as and when each of the actions complete. The `progress`
+argument has to be a function of the form -
+
+    function (i, done, total) {...}
+
+where `i` is the index of the action that completed, `done` is the total
+number of actions completed up to the progress call and `total` is the
+total actions given. 
+
+    IO.do(IO.log("before")
+        , IO.fork([a1, a2, ...])
+        , IO.log("after"))
+
+## IO.spawn(action) ##
+
+Spawns off the given action without joining it with the following steps.
+`IO.spawn` always succeeds. The errors in the action are not part of the
+sequence that the spawn belongs to and won't touch it in any way. 
+
+If you want to fork out some actions but don't want to wait for them to join
+back again, do this -
+
+    IO.spawn(IO.fork([a1, a2, ...]))
+
+## IO.timeout(ms, action, error) ##
+
+Generates an action that couples the given action with a watchdog timer.
+If the watchdog fires before the action finishes, then the main action sequence
+will be considered to fail and the given `error` object becomes the failure
+object. Note that this is a weak timeout, in the sense that the action is
+not aborted. Only the continuation is aborted.
+
+## IO.atomic(action) ##
+
+Constructs an action that makes the given action operate atomically.
+In other words, the intermediate steps of the action will always be
+executed in sequence, no matter how many "run" calls you execute.
+If the action takes a long time, all those run calls will accumulate
+at the entry point of this action and will be processed in sequence
+one at a time. This is useful if the intermediate steps contain
+any "open database -> do something -> close database" kind of actions.
+
+    IO.atomic(a1, a2, ...)
+    IO.atomic([a1, a2, ...])
+        = IO.atomic(IO.do(a1, a2, ...))
+
+## IO.dynamic(fn) ##
+
+A dynamic action is a an action that is determined by the given function `fn`.
+`fn` will be passed the input at this point this action fires and whatever
+action `fn` returns will be used as the action to run. This action behaves
+as though it were that action from the beginning.
+
+    IO.dynamic(function (input) {
+        return IO.log("some new action");
+    })
+
+## IO.cond(branches) ##
+
+A simple kind of dynamic action that chooses from a given list of actions by
+pattern matching on the input. `branches` is an array of two-element arrays --
+i.e. it is of the form `[[pat1, action1], [pat2, action2], ...]`. The `patN`
+are patterns to be matched against the input and if `patK` is the first pattern
+that matches, then `actionK` is run as though the whole `cond` was that action
+from the beginning. 
+
+If none of the patterns match, `cond` raises an error (the error action is
+`IO.cond.error`).  You're supposed to think of all valid cases and support
+them. The "raises error" behaviour is there to help you do that. You can
+customize this by passing in an action to be used in this case as an extra
+argument.
+
+### Patterns ###
+
+Patterns can be -
+
+1.  Simple literals such as string and numbers that are matched against the
+    input using `===`. 
+
+        IO.cond([
+            //...
+            ["literal", IO.log("some action"), ...]
+            //...
+        ]);
+
+2.  Object literals. In this case, the input must be an object and the keys
+    provided must all exist in the input, besides the values also pattern
+    matching. The "patterns" in the value can be, again, of any type in this
+    list.
+
+        IO.cond([
+            //...
+            [{key1: pat1, key2: pat2, ...}, IO.log("some action"), ...]
+            //...
+        ]);
+
+3.  A one argument function whose boolean result decides the success of the
+    pattern match. Since functions can't usually be meaningfully compared or
+    pattern matched, this is a useful way to provide customizeable matching
+    support. `IO.cond.true` is a trivial pattern matcher that always succeeds
+    and `IO.cond.false` is one that always fails, which can be used as such
+    matchers.
+
+        IO.cond([
+            //...
+            [function (val) { return val > 3 && val < 10; }, IO.log("some action"), ...]
+            //...
+        ])
+
+
+# Trivial but useful actions #
+
+## IO.log(string, inputAlso) ##
+
+An action that logs the string when it is hit and continues normally.
+If `inputAlso` is `true`, then the input is also printed using `JSON.stringify`.
+
+    IO.log("hello")
+
+## IO.tap(func) ##
+
+Generates an action that calls `func` in the given `context` object,
+with the input that came into the action, but otherwise doesn't affect
+the flow and the sequence will automatically continue. Notice that
+`func` is not given access to the sequencing object, so it cannot
+affect the sequence, not even by throwing an exception.
+
+    IO.tap(function (input) {
+        document.write("input received");
+    })
+
+## IO.add(input) ##
+
+This generates an action that adds the keys of the supplied input object
+to the input that arrived via the action sequence. This is useful for 
+inserting additional information into the "data stream".
+
+    IO.Ex.run({one: "ek"}, 
+        IO.do(IO.log("before", true)
+            , IO.add({two: "do"})
+            , IO.log("after", true)));
+
+## IO.supply(input) ##
+
+Similar to `IO.add`, but ignores the input that came in through the
+action sequence and replaces it with the given input object.
+
+    IO.Ex.run({one: "ek"}, 
+        IO.do(IO.log("before", true)
+            , IO.supply({two: "do"})
+            , IO.log("after", true)));
+
+
+## IO.delay(ms, action) ##
+
+Generates an action that will delay the execution of the given action
+by the given amount of time. Apart from that, the semantics of the
+action doesn't change.
+
+    IO.delay(1000, IO.log("bing!"))
+
+## IO.pass ##
+
+This is a trivial action that you can use as return values from 
+functions in case the function wants to return a no-op.
+
+    IO.cond([
+        //...
+        ["some pat", IO.pass]
+        //..
+    ])
+
+## IO.fail ##
+
+The trivial fail action jumps to the failure continuation.
+
+    IO.cond([
+        //...
+        ["some pat", IO.fail]
+        //...
+    ])
+
+# Utilities #
+
+## IO.util ##
+
+This namespace contains a bunch of utilty functions that make composeable
+actions for use elsewhere.
+
+### IO.util.notify(delegate, selector, ...) ###
+
+Calls `delegate[selector](...)` without affecting the flow at this point.
+Useful for asynchronous notifications.
+
+## (TODO) IO.browser ##
+
+This namespace contains some utilities for browser-side IO.
+
+### IO.browser.initFileSystemAPI(storageQuota_MB) => fs ###
+### IO.browser.fetchURL(url, responseType) => {url: url, data: data} ###
+### IO.browser.getFileEntry(fs, absPath) => FileEntry ###
+### IO.browser.saveFile(fs, absPath, data) ###
+### IO.browser.loadFile(fs, absPath) => {path: absPath, data: result} ###

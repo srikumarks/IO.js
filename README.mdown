@@ -1,4 +1,4 @@
-# IO.js: A framework for composeable asynchronous actions #
+# IO.js: A library for composeable asynchronous actions #
 
 `IO` is a Javascript library for managing sequencing of asynchronous actions.
 This [infoq article] summarizes the state of the art in an interview conducted

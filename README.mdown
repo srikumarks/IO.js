@@ -240,9 +240,14 @@ The closest catch point gets to have a go first and can do a variety of things -
 
 Makes an action that starts off all the actions in the given `actions` array
 asynchronously. The resultant action will continue only after *all* of these
-actions complete (successfully, or by failing). You can optionally supply a
-progress function that will be called to be notified as and when each of the
-actions complete. The `progress` argument has to be a function of the form -
+actions complete (successfully, or by failing). The results of the actions are
+accumulated in an array, which is passed further down the sequence once all the
+actions finish. The array will contain either success values or `IO.Error`
+objects if errors occurred. 
+
+You can optionally supply a progress function that will be called to be
+notified as and when each of the actions complete. The `progress` argument has
+to be a function of the form -
 
     function (i, done, total) {...}
 

@@ -94,7 +94,7 @@ var ExM = {
                 console.error(e);
                 if (failure) {
                     try {
-                        failure(M, M.error(e, success, failure), M.drain, M.drain);
+                        failure(M, new IOError(M, e, input, success, failure), M.drain, M.drain);
                     } catch (e2) {
                         console.error("failure handler failed with " + e2);
                     }
@@ -119,7 +119,7 @@ var ExM = {
 
     delay: function (ms, action, input, success, failure) {
         var M = this;
-        setTimeout(function () {
+        (ms > 0 ? setTimeout : M.nextTick)(function () {
             M.call(action, input, success, failure);
         }, ms);
     }
@@ -368,6 +368,49 @@ function alt_impl(actions) {
     };
 };
 
+// Similar to IO.alt, but starts all actions simultaneously like IO.fork.
+// The first one that completes results in the other actions being cancelled.
+IO.any = function (actions) {
+    if (actions instanceof Function) {
+        actions = [].slice.call(arguments, 0);
+    }
+    actions = actions.map(autowrap);
+
+    return any_impl(actions);
+};
+
+function any_impl(actions) {
+    if (actions.length === 0) {
+        return IO.raise("IO.any has no actions to run");
+    } else {
+        return function any_(M, input, success, failure) {
+            var done = false;
+            var errCount =  0;
+
+            var join = function (M, output, succ_, fail_) {
+                if (done) {
+                    M.call(fail_, "any", M.drain, M.drain);
+                } else {
+                    done = true;
+                    M.call(success, output, M.drain, failure);
+                }
+            };
+
+            var joinerr = function (M, err, succ_, fail_) {
+                ++errCount;
+                M.call(fail_, err, M.drain, M.drain);
+                if (errCount === actions.length) {
+                    M.call(failure, "any", M.drain, M.drain);
+                }
+            };
+
+            actions.forEach(function (a) {
+                M.delay(0, a, input, join, joinerr);
+            });
+        };
+    }
+}
+
 // To use this action maker, the data flowing at this point
 // must be an object to which the given kvpairs (also
 // expressed as an object) are added before passing 
@@ -389,9 +432,10 @@ function sendKV(kvpairs, action) {
 IO.catch = function (onfail) {
     onfail = autowrap(onfail);
     return function catch_(M, input, start, traceback) {
-        var restart = autobranch(M, catch_, start, traceback);
-        var withRestart = sendKV({restart: restart}, onfail);
-        M.call(start, input, M.drain, branch(withRestart, restart, traceback));
+        var restartCB = autobranch(M, catch_, start, traceback);
+        var restartAct = branch(catch_, start, traceback);
+        var withRestart = sendKV({restart: restartCB}, onfail);
+        M.call(start, input, M.drain, branch(withRestart, restartAct, traceback));
     };
 };
 
@@ -436,8 +480,7 @@ IO.fork = function (actions) {
         actions.forEach(function (a, i) {
             var Mi = Object.create(M);
             a = IO.do([a, IO.map(function (output) { return {index: i, value: output}; })]);
-            Mi.depth = Mi.maxdepth;
-            Mi.call(a, input, join, sendKV({index: i}, errjoin));
+            Mi.delay(0, a, input, join, sendKV({index: i}, errjoin));
         });
     };
 };
@@ -706,13 +749,6 @@ IO.Tracer = function (M) {
 
     var T = Object.create(M || IO.Ex);
 
-    T.delay = function (ms) {
-        this.nextTick = function (f) {
-            setTimeout(f, ms);
-        };
-        return this;
-    };
-
     T.call = function (action, input, success, failure) {
         var M = this;
         M.depth++;
@@ -723,7 +759,7 @@ IO.Tracer = function (M) {
                 }
                 action(M, input, success || M.drain, failure || M.drain);
             } catch (e) {
-                console.error(e);
+                console.error(e.stack);
                 if (failure) {
                     try {
                         console.error(failure.name + '(' + e + ')');

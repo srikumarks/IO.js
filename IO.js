@@ -439,6 +439,39 @@ IO.catch = function (onfail) {
     };
 };
 
+// Routes the given input through the given action and
+// routes whatever input arrives from the enclosing sequence
+// around the action.
+function bindInput(input, action) {
+    return function (M, newInput, success, failure) {
+        M.call(action
+                , input
+                , function (M, _, succ_, fail_) {
+                    M.call(success, newInput, succ_, fail_);
+                  }
+                , failure);
+    };
+}
+
+// Runs action and before exiting action either successfully
+// or through a failure, runs the cleanup action before proceeding.
+// The cleanup action as well as action both receive the same input
+// but the cleanup action's output is drained.
+//
+// The cleanup action sequence is not expected to launch failure
+// sequences of its own. If you wish the cleanup action to happen
+// in parallel with the rest of the code, just wrap it in an IO.spawn().
+IO.finally = function (cleanup, action) {
+    action = autoseq(action);
+
+    return function finally_(M, input, success, failure) {
+        var boundCleanup = bindInput(input, cleanup);
+        var normal = seq(boundCleanup, success);
+        var exceptional = seq(boundCleanup, failure);
+        M.call(action, input, normal, exceptional);        
+    };
+};
+
 // Takes a list of actions (either as arguments or as an array) and
 // runs them all "in parallel", waits for all of them to either complete
 // or fail, collects all the results in an array and passes it on to

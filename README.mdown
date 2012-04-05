@@ -242,7 +242,18 @@ The closest catch point gets to have a go first and can do a variety of things -
             M.call(some_complex_action, err, success, failure);
         })
 
-    
+## IO.finally(cleanup, action) ##
+
+Composes the given `action` with a `cleanup` action such that the cleanup
+action will run after action completes successfully or just before action
+fails and control is about to leave all steps in action. The `cleanup`
+action is passed the same input passed to `action` and the output of the
+`cleanup` action is discarded before continuing. 
+
+You want the cleanup action to be as invisible to the surrounding context as
+possible, so for semantic purposes `IO.finally(cleanup, action)` would just be
+equivalent to `action` as though there is a garbage collector automatically
+cleaning up whenever necessary.
 
 ## IO.fork(actions, progress) ##
 

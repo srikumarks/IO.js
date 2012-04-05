@@ -294,7 +294,7 @@ function chain(actions) {
         actions = [].slice.call(arguments, 0);
     }
 
-    return (actions.length === 1 ? autowrap(actions[0]) : chain_impl(actions.map(autowrap)));
+    return chain_impl(actions.map(autowrap));
 }
 
 function chain_impl(actions) {
@@ -780,34 +780,33 @@ IO.Tracer = function (M) {
 
     T.call = function (action, input, success, failure) {
         var M = this;
-        M.depth++;
-        if (M.depth < M.maxdepth) {
+        if (M.depth++ < M.maxdepth) {
             try {
                 if (action.name && action.name.length > 0) {
-                    console.log(action.name.replace("_", "") + '(' + JSON.stringify(input) + ')');
+                    console.log("trace:\t" + action.name.replace("_", "") + '(' + JSON.stringify(input) + ')');
                 }
                 action(M, input, success || M.drain, failure || M.drain);
             } catch (e) {
-                console.error(e.stack);
+                console.error("trace:\t" + e.stack);
                 if (failure) {
                     try {
-                        console.error(failure.name + '(' + e + ')');
+                        console.error("trace:\t" + failure.name + '(' + e + ')');
                         failure(M, e, M.drain, M.drain);
                     } catch (e2) {
-                        console.error("failure handler failed with " + e2);
+                        console.error("trace:\t" + "failure handler failed with " + e2);
                     }
                 }
             }
         } else {
             M.nextTick(function () {
-                M.depth = -1;
+                M.depth = Math.min(0, M.maxdepth - 1);
                 M.call(action, input, success, failure);
             });
         }
     };
 
     T.drain = function (M, input, success, failure) {
-        console.log("\t" + JSON.stringify(input) + " => drain");
+        console.log("trace:\t\t" + JSON.stringify(input) + " => drain");
     };
 
 
@@ -821,10 +820,17 @@ IO.run = function (input, action) {
     ExM.run(input, action);
 };
 
-var TracerM = IO.Tracer(IO.Ex);
-
-IO.trace = function (input, action) {
-    TracerM.run(input, action);
+// IO.trace(a1, a2, ...) 
+// IO.trace([a1, a2, ...])
+//      => action which prints out steps as it runs.
+IO.trace = function (actions) {
+    if (actions instanceof Function) {
+        actions = [].slice.call(arguments, 0);
+    }
+    var action = autoseq(actions);
+    return function (M, input, success, failure) {
+        IO.Tracer(M).call(action, input, success, failure);
+    };
 };
 
 }(IO));

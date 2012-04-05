@@ -107,12 +107,20 @@ customization.)
 
         IO.run(input, action) = IO.Ex.run(input, action)
 
-2.  `IO.trace(input, action)` is semantically the same as `IO.run`, except that
-    it will dump a trace of all the operations in the sequence to
-    `console.log`. It is an alias for the higher order "tracer", which can be
-    applied to other orchestrators.
+2.  If you want to trace the steps involved as an action runs on `console.log`,
+    you can turn an action into a traced action using `IO.trace` like this -
+    `IO.trace(action)`. So if you run `IO.run(input, IO.trace(action))`, you'll
+    get tracing output on the console. 
 
-        IO.trace(input, action) = IO.Tracer(IO.Ex).run(input, action)
+        IO.run(input, IO.trace(action)) = IO.Tracer(IO.Ex).run(input, action)
+
+    `IO.trace` works by changing the orchestrator on the fly to a tracer built
+    on the original orchestrator used to run the action. The semantics of the
+    action aren't affected by the insertion of the trace. This design, as
+    opposed to merely exposing the tracer, also lets you trace selected
+    portions of a longer action sequence. You can use `IO.trace` as a
+    replacement for `IO.do`.
+
 
 # Core actions #
 
@@ -382,20 +390,20 @@ This generates an action that adds the keys of the supplied input object
 to the input that arrived via the action sequence. This is useful for 
 inserting additional information into the "data stream".
 
-    IO.trace({one: "ek"}, 
-        IO.do(IO.log("before", true)
-            , IO.add({two: "do"})
-            , IO.log("after", true)));
+    IO.run({one: "ek"}, 
+        IO.trace(IO.log("before", true)
+               , IO.add({two: "do"})
+               , IO.log("after", true)));
 
 ## IO.supply(input) ##
 
 Similar to `IO.add`, but ignores the input that came in through the
 action sequence and replaces it with the given input object.
 
-    IO.trace({one: "ek"}, 
-        IO.do(IO.log("before", true)
-            , IO.supply({two: "do"})
-            , IO.log("after", true)));
+    IO.run({one: "ek"}, 
+        IO.trace(IO.log("before", true)
+               , IO.supply({two: "do"})
+               , IO.log("after", true)));
 
 
 ## IO.delay(ms, action) ##

@@ -283,9 +283,7 @@ function wrapAsync2(action) {
 // as an array or a single action. autoseq normalizes 
 // both cases into a single action.
 function autoseq(action) {
-    return (action instanceof Array) 
-        ? (action.length === 1 ? action[0] : chain(action)) 
-        : autowrap(action);
+    return (action instanceof Array) ? chain(action) : autowrap(action);
 }
 
 // Turns an array of actions,  or actions given as arguments,
@@ -296,7 +294,7 @@ function chain(actions) {
         actions = [].slice.call(arguments, 0);
     }
 
-    return chain_impl(actions.map(autowrap));
+    return (actions.length === 1 ? autowrap(actions[0]) : chain_impl(actions.map(autowrap)));
 }
 
 function chain_impl(actions) {
@@ -309,15 +307,13 @@ function chain_impl(actions) {
     // enough if we compute the continuations on the fly
     // as the sequence executes.
 
-    return function (M, input, success, failure) {
-        if (actions.length === 0) {
-            M.call(success, input, M.drain, failure);
-        } else if (actions.length === 1) {
-            M.call(actions[0], input, success, failure);
-        } else {
-            M.call(actions[0], input, seq(chain_impl(actions.slice(1)), success), failure);
-        }
-    };
+    switch (actions.length) {
+        case 0: return pass;
+        case 1: return actions[0];
+        default: return function (M, input, success, failure) {
+            M.call(actions[0], input, branch(chain_impl(actions.slice(1)), success, failure), failure);
+        };
+    }
 }
 
 // Raises an error, which gets passed first to the immediately

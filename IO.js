@@ -239,12 +239,22 @@ function autowrap(action) {
 
 // Wrap a simple function.
 function wrapFn(fn) {
-    return function call_(M, input, success, failure) {
+    return function dynamic_(M, input, success, failure) {
         try {
             var result = fn(input);
-            if (result !== undefined) {
-                M.call(success, result, M.drain, failure);
+            if (result === undefined) {
+                // Stop the execution sequence.
+            } else if (result instanceof Function) {
+                // When the function returns an action, splice
+                // it into the current action sequence. This
+                // serves as a "dynamic" action determined at the
+                // time the input is available.
+                M.call(autowrap(result), input, success, failure);
             } else {
+                // Ordinary value. Treat it as the output of the
+                // action that has to be passed on to the rest of
+                // the sequence.
+                M.call(success, result, M.drain, failure);
             }
         } catch (e) {
             M.call(failure, e, M.drain, M.drain);
@@ -575,15 +585,7 @@ IO.tap = function (fn) {
     };
 };
 
-// Calls the given function on the input received
-// and runs the action returned by the function.
-IO.dynamic = function (fn) {
-    return function dynamic_(M, input, success, failure) {
-        M.call(autowrap(fn(input)), input, success, failure);
-    };
-};
-
-// A simpler form of dynamic. branches is an array
+// A simple form of dynamic action. branches is an array
 // of two-element arrays, where the first element
 // gives the value to test against and the second
 // element gives the action to choose.

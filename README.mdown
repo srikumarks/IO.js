@@ -56,9 +56,12 @@ using the number of arguments that the function has -
         function (input) { return something; }
 
     These actions succeed by returning a result which is passed along, or fail
-    by throwing an exception. You shouldn't be using `IO` if you only have
-    actions of this kind. If you want the function to stop the execution, you
-    can return `undefined`.
+    by throwing an exception. If the return value is an action, that action is
+    inserted into the sequence right there, supplying the same given input.
+    This gets us "dynamic actions". If the return value is not an action and is
+    a datum, it is considered to be the output of this action that is to be passed
+    to the steps further ahead in the sequence. If the return value is `undefined`,
+    the execution sequence stops right there.
 
 2.  Pure action of the form --
 

@@ -47,6 +47,17 @@ var nextTick = (function () {
     }
 }());
 
+
+function actionArray(actions, ix) {
+    ix = ix || 0;
+    var action = actions[ix];
+    if (action instanceof Function) {
+        return Array.prototype.slice.call(actions, ix);
+    } else {
+        return action;
+    }
+}
+
 //  A simple error wrapper class. This is the object
 //  received as a "value" in catch blocks.
 function IOError(M, error, input, success, failure) {
@@ -143,7 +154,6 @@ function autodrain(M, action) {
 // Similar to autodrain, but branches to success once the
 // action succeeds and to failure if it fails.
 function autobranch(M, action, success, failure) {
-    var M = this;
     return function (input) {
         M.call(action, input, success, failure);
     };
@@ -175,7 +185,7 @@ function send(input, action) {
 // Sequences two actions.
 function seq(a, b) {
     return function (M, input, success, failure) {
-        M.call(a, input, branch(b, success, failure), failure);
+        M.call(a, input, seq(b, success), failure);
     };
 }
 
@@ -300,11 +310,7 @@ function autoseq(action) {
 // into a single action that runs each in sequence, piping the
 // output of each to the next.
 function chain(actions) {
-    if (actions instanceof Function) {
-        actions = [].slice.call(arguments, 0);
-    }
-
-    return chain_impl(actions.map(autowrap));
+    return chain_impl(actionArray(arguments).map(autowrap));
 }
 
 function chain_impl(actions) {
@@ -321,7 +327,7 @@ function chain_impl(actions) {
         case 0: return pass;
         case 1: return actions[0];
         default: return function (M, input, success, failure) {
-            M.call(actions[0], input, branch(chain_impl(actions.slice(1)), success, failure), failure);
+            M.call(actions[0], input, seq(chain_impl(actions.slice(1)), success), failure);
         };
     }
 }
@@ -353,12 +359,7 @@ IO.try = function (action, onfail) {
 // to the first one that succeeds. The whole alt action
 // is semantically the same as as that succeeding action.
 IO.alt = function (actions) {
-    if (actions instanceof Function) {
-        actions = [].slice.call(arguments, 0);
-    }
-    actions = actions.map(autowrap);
-
-    return alt_impl(actions);
+    return alt_impl(actionArray(arguments).map(autowrap));
 };
 
 function alt_impl(actions) {
@@ -374,15 +375,11 @@ function alt_impl(actions) {
     };
 };
 
-// Similar to IO.alt, but starts all actions simultaneously like IO.fork.
-// The first one that completes results in the other actions being cancelled.
+// Starts all actions simultaneously like IO.fork. The first action
+// that completes is the "winning" action that passes its result to
+// the output and cancels the other actions.
 IO.any = function (actions) {
-    if (actions instanceof Function) {
-        actions = [].slice.call(arguments, 0);
-    }
-    actions = actions.map(autowrap);
-
-    return any_impl(actions);
+    return any_impl(actionArray(arguments).map(autowrap));
 };
 
 function any_impl(actions) {
@@ -466,15 +463,22 @@ function bindInput(input, action) {
 //
 // The cleanup action sequence is not expected to launch failure
 // sequences of its own. If you wish the cleanup action to happen
-// in parallel with the rest of the code, just wrap it in an IO.spawn().
+// in parallel with the rest of the code, just wrap it in an IO.tee().
 IO.finally = function (cleanup, action) {
     action = autoseq(action);
 
     return function finally_(M, input, success, failure) {
-        var boundCleanup = bindInput(input, cleanup);
-        var normal = seq(boundCleanup, success);
-        var exceptional = seq(boundCleanup, failure);
-        M.call(action, input, normal, exceptional);        
+        var cleanupB = bindInput(input, cleanup);
+
+        // We need to cleanup before passing on to failure handlers above,
+        // but if we do that, we cannot resume from the error point,
+        // but we ought to be able to resume from this finally clause,
+        // so change the resume point to this finally clause after running
+        // the cleanup action and then pass control to failure handlers
+        // above.
+        var exceptional = seq(IO.add({resume: autobranch(M, finally_, success, failure)}), failure);
+
+        M.call(action, input, seq(cleanupB, success), seq(cleanupB, exceptional));
     };
 };
 
@@ -484,11 +488,8 @@ IO.finally = function (cleanup, action) {
 // the actions after the fork. Both errors as well as success values
 // are passed. The actions further down can detect error values using
 //      input instanceof IO.Error
-IO.fork = function (actions) {
-    if (actions instanceof Function) {
-        actions = [].slice.call(arguments, 0);
-    }
-    actions = actions.map(autowrap);
+IO.fork = function () {
+    var actions = actionArray(arguments).map(autowrap);
 
     return function fork_(M, input, success, failure) {
         var countUp = 0;
@@ -732,10 +733,7 @@ IO.log = function (msg, inputAlso) {
 // a variety of circumstances where you don't want the intermediate
 // steps involved in the action to be active in more than one "thread".
 IO.atomic = function (action) {
-    if (action instanceof Function) {
-        action = [].slice.call(arguments, 0);
-    }
-    action = autoseq(action);
+    action = autoseq(actionArray(arguments));
 
     var arr = [];
     var busy = false;
@@ -826,10 +824,7 @@ IO.run = function (input, action) {
 // IO.trace([a1, a2, ...])
 //      => action which prints out steps as it runs.
 IO.trace = function (actions) {
-    if (actions instanceof Function) {
-        actions = [].slice.call(arguments, 0);
-    }
-    var action = autoseq(actions);
+    var action = autoseq(actionArray(arguments));
     return function (M, input, success, failure) {
         IO.Tracer(M).call(action, input, success, failure);
     };

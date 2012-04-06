@@ -213,14 +213,15 @@ The closest catch point gets to have a go first and can do a variety of things -
         })
 
         // Ex: 
-        IO.do(IO.log("one")
-            , IO.log("two")
-            , IO.catch(function (err, restart, giveup) {
-                err.resume("YAY!");
-              })
-            , IO.log("three")
-            , IO.raise("BOMB!")
-            , IO.log("surprise!"))
+        IO.run("input", 
+            IO.trace(IO.log("one")
+                , IO.log("two")
+                , IO.catch(function (err, restart, giveup) {
+                    err.resume("YAY!");
+                  })
+                , IO.log("three")
+                , IO.raise("BOMB!")
+                , IO.log("surprise!")))
 
 4.  Do the "rollback" sequence again from the error point. This action is
     available in the error object and is invoked as `error.rollback(value)`.
@@ -258,6 +259,13 @@ possible, so for semantic purposes `IO.finally(cleanup, action)` would just be
 equivalent to `action` as though there is a garbage collector automatically
 cleaning up whenever necessary.
 
+Note that when an `IO.finally` clause is preceded by a `IO.catch` (somewhere),
+the cleanup action will run before control gets to the catch. If the catch then
+decides to resume using `err.resume(value)`, the steps from the `finally`
+and onwards will run and not right at the error point. So if you want to
+trap errors before the cleanup action of a `finally` gets to run, you have
+to put the `catch` *within* the `finally`'s scope.
+
 ## IO.fork(actions, progress) ##
 
 Makes an action that starts off all the actions in the given `actions` array
@@ -281,16 +289,16 @@ total actions given.
         , IO.fork([a1, a2, ...])
         , IO.log("after"))
 
-## IO.spawn(action) ##
+## IO.tee(action) ##
 
 Spawns off the given action without joining it with the following steps.
-`IO.spawn` always succeeds. The errors in the action are not part of the
-sequence that the spawn belongs to and won't touch it in any way. 
+`IO.tee` always succeeds. The errors in the action are not part of the
+sequence that the tee belongs to and won't touch it in any way. 
 
 If you want to fork out some actions but don't want to wait for them to join
 back again, do this -
 
-    IO.spawn(IO.fork([a1, a2, ...]))
+    IO.tee(IO.fork([a1, a2, ...]))
 
 ## IO.timeout(ms, action, onerror) ##
 
@@ -316,15 +324,15 @@ close database" kind of actions.
     IO.atomic([a1, a2, ...])
         = IO.atomic(IO.do(a1, a2, ...))
 
-## IO.dynamic(fn) ##
+## IO.pipeline(actions) ##
 
-A dynamic action is an action that is determined by the given function `fn`.
-`fn` will be passed the input at the point this action fires and whatever
-action `fn` returns will be used as the action to run. 
+Builds a pipeline of the actions in the given array, turning each action
+into a FIFO processor. This is just a convenient shorthand for an action
+that can be easily built using `IO.do` and `IO.atomic` as shown below.
 
-    IO.dynamic(function (input) {
-        return IO.log("some new action");
-    })
+    IO.pipeline(a1, a2, ...)
+        = IO.pipeline([a1, a2, ...])
+        = IO.do([a1, a2, ...].map(IO.atomic))
 
 ## IO.cond(branches) ##
 
@@ -377,8 +385,45 @@ Patterns can be -
             //...
         ])
 
+## IO.map(fn) ##
+
+An action that transforms the input it receives using the given function `fn`
+and sends that value as its output.
+
+## IO.filter(pred) ##
+
+An action that will let only those inputs pass through which satisfy the
+given one-argument predicate function. Other inputs are just drained.
+
+## IO.reduce(reductionFn, initialValue) ##
+
+Makes a reducing action that will, for each input received, apply the given
+reduction function (of the form `reductionFn(accum, value)`) to accumulate
+some result and send the accumulated result to its output.
 
 # Trivial but useful actions #
+
+## IO.pass ##
+
+This is a trivial action that you can use as return values from functions in
+case the function wants to return a no-op.
+
+    IO.cond([
+        //...
+        ["some pat", IO.pass]
+        //..
+    ])
+
+## IO.fail ##
+
+The trivial fail action jumps to the failure continuation.
+
+    IO.cond([
+        //...
+        ["some pat", IO.fail]
+        //...
+    ])
+
 
 ## IO.log(string, inputAlso) ##
 
@@ -387,14 +432,14 @@ If `inputAlso` is `true`, then the input is also printed using `JSON.stringify`.
 
     IO.log("hello")
 
-## IO.tap(func) ##
+## IO.probe(func) ##
 
 Generates an action that calls `func` with the input that came into the action,
 but otherwise doesn't affect the flow and the sequence will automatically
 continue. Notice that `func` is not given access to the sequencing object, so
 it cannot affect the sequence, not even by throwing an exception.
 
-    IO.tap(function (input) {
+    IO.probe(function (input) {
         document.write("input received");
     })
 
@@ -420,34 +465,34 @@ action sequence and replaces it with the given input object.
                , IO.log("after", true)));
 
 
-## IO.delay(ms, action) ##
+## IO.delay(ms) ##
 
-Generates an action that will delay the execution of the given action
-by the given amount of time. Apart from that, the semantics of the
-action doesn't change.
+Generates an action that will wait for the given number of milliseconds before
+proceeding.delay the execution of the given action by the given amount of time. 
 
-    IO.delay(1000, IO.log("bing!"))
+    IO.do(IO.delay(1000), IO.log("bing!"))
 
-## IO.pass ##
+## IO.clock(ms) ##
 
-This is a trivial action that you can use as return values from 
-functions in case the function wants to return a no-op.
+A clock triggers the action sequence that follows periodically. You can put
+a clock in front of an action by composing it using `IO.do` like this -
 
-    IO.cond([
-        //...
-        ["some pat", IO.pass]
-        //..
-    ])
+    var periodicAction = IO.do(IO.clock(500), someAction);
 
-## IO.fail ##
+The above clock will then send an incrementing counter to `someAction` every
+500ms. 
 
-The trivial fail action jumps to the failure continuation.
+The clock is inactive upon creation. You start the clock by running the
+composed action with "start" as the input. Running it again with "stop" will
+stop the periodic runs and running it with "reset" will reset the clock counter
+back to 0.
 
-    IO.cond([
-        //...
-        ["some pat", IO.fail]
-        //...
-    ])
+**WARNING** : It is up to you to make sure that the action being triggered by
+the clock will not take longer than the time interval between two ticks.
+Otherwise, actions will start accumulating and your system, at some point, will
+go down.  This is intended for stuff like periodic cleanup actions and
+keep-alives, where the time taken by the action is minuscule compared to the
+tick interval.
 
 # Utilities #
 

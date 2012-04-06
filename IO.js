@@ -526,11 +526,12 @@ IO.fork = function () {
 };
 
 // Spawns off the action without joining it with the
-// following steps.
-IO.spawn = function (action) {
+// following steps. This is like a "T" junction and hence
+// the name.
+IO.tee = function (action) {
     action = autowrap(action);
 
-    return function spawn_(M, input, success, failure) {
+    return function tee_(M, input, success, failure) {
         nextTick(function () {
             M.call(action, input, M.drain, M.drain);
         });
@@ -574,7 +575,7 @@ IO.timeout = function (ms, action, ontimeout) {
 // Calls fn passing it the input flowing in sequence at that
 // point, discards its result or error, and proceeds as though
 // nothing happened.
-IO.tap = function (fn) {
+IO.probe = function (fn) {
     return function tap_(M, input, success, failure) {
         try {
             fn(input);
@@ -659,23 +660,11 @@ function patternMatcher(fixed) {
 }
 
 
-// Waits for given milliseconds to pass on control to the given action.
-IO.delay = function (ms, action) {
-    if (action === undefined) {
-        // Support a one-argument form where the "ms"
-        // argument is omitted.
-        action = ms;
-        ms = 0;
-    }
-
-    action = autowrap(action);
-
+// Waits for given milliseconds to pass on control to the next action
+// in the sequence.
+IO.delay = function (ms) {
     return function delay_(M, input, success, failure) {
-        if (ms === 0) {
-            M.call(action, input, success, failure);
-        } else {
-            M.delay(ms, action, input, success, failure);
-        }
+        M.delay(ms, success, input, M.drain, failure);
     };
 };
 
@@ -711,20 +700,30 @@ IO.supply = function (value) {
 // Applies the given function on the data flowing at this
 // point and passes on what the function returns instead.
 IO.map = function (fn) {
-    return function (M, input, success, failure) {
+    return function map_(M, input, success, failure) {
         M.call(success, fn(input), M.drain, failure);
     };
 };
 
-// LOgs the given message string, but is otherwise a no-op.
-IO.log = function (msg, inputAlso) {
-    return function log_(M, input, success, failure) {
-        if (inputAlso) {
-            console.log(msg + JSON.stringify(input));
-        } else {
-            console.log(msg);
+// An action that will only let through those inputs
+// that satisfy the given predicate.
+IO.filter = function (pred) {
+    return function filter_(M, input, success, failure) {
+        if (pred(input)) {
+            M.call(success, input, M.drain, failure);
         }
-        M.call(success, input, M.drain, failure);
+    };
+};
+
+// Applies the reduction function and generates the reduced
+// result as each input arrives.
+//
+// reductionFn(accumulatedResult, value) -> new accumulated result
+IO.reduce = function (reductionFn, initialValue) {
+    var acc = initialValue;
+
+    return function (M, input, success, failure) {
+        M.call(success, acc = reductionFn(acc, input), M.drain, failure);
     };
 };
 
@@ -759,6 +758,94 @@ IO.atomic = function (action) {
     
     return doit;
 };
+
+// IO.pipeline(a1, a2, ...)
+//  = IO.pipeline([a1, a2, ...]) 
+//  = IO.do([a1, a2, ...].map(IO.atomic))
+//
+// Creates a "pipeline" where each action is turned into a FIFO processor
+// by attaching an input queue to it. You typically pump actions to a 
+// pipeline using multiple IO.run calls.
+//
+// You can also make a pipeline a part of other "host" action sequences.
+// In such cases, the host action sequences will only receive the output
+// corresponding to the inputs that they sent and not those by any other.
+IO.pipeline = function (actions) {
+    return IO.do(actionArray(arguments).map(IO.atomic));
+};
+
+// Makes a clock action that behaves as follows -
+// 
+// When it receives "start" as its input, it starts periodically
+// triggering the actions that follow. The value that it sends
+// to them is determined by `tickFn(i)` where `i` is the i-th
+// tick number of the clock, with the first tick number being 0.
+// 
+// When it receives "stop" as its input, it stops ticking.
+// 
+// When it receives "reset", the tick number is reset to 0 for
+// the next tick.
+//
+// All other inputs are ignored.
+//
+// To make an action trigger periodically, you snap a clock
+// to its front and send the whole composite action a "start"
+// message, like so -
+//
+//      var periodicAction = IO.do(IO.clock(1000), someAction);
+//      IO.run("start", periodicAction);
+//
+// To stop the periodic action that's running, do this -
+//      IO.run("stop", periodicAction);
+//
+// Note that if the remaining steps take longer than the clock
+// period, then you'll end up piling up work pretty quickly.
+// So this kind of scheduling of actions is to be used only
+// in cases where you know that the actions will complete in
+// a much shorter interval than a clock period.
+IO.clock = function (period_ms, tickFn) {
+    var tickNumber = 0;
+    var ticking = false;
+
+    tickFn = tickFn || function (i) { return i; };
+
+    function tick(M, input, success, failure) {
+        if (ticking) {
+            M.call(success, tickFn(tickNumber++), M.drain, failure);
+            M.delay(period_ms, tick, null, success, failure);
+        }
+    }
+
+    return function clock_(M, input, success, failure) {
+        if (input === "reset") {
+            tickNumber = 0;
+        }
+
+        if (ticking) {
+            if (input === "stop") {
+                ticking = false;
+            } 
+        } else {
+            if (input === "start") {
+                ticking = true;
+                M.delay(0, tick, tickNumber, success, failure);
+            }
+        }
+    };
+};
+
+// LOgs the given message string, but is otherwise a no-op.
+IO.log = function (msg, inputAlso) {
+    return function log_(M, input, success, failure) {
+        if (inputAlso) {
+            console.log(msg + JSON.stringify(input));
+        } else {
+            console.log(msg);
+        }
+        M.call(success, input, M.drain, failure);
+    };
+};
+
 
 // IO.Ex is the main execution orchestrator. You run
 // actions by calling IO.Ex.run(input, action).

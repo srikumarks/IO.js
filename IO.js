@@ -19,6 +19,7 @@
 
 // Trying to write an outer module structure that will work
 // for both in-browser usage and in Node.js.
+var util = require('util');
 var IO;
 
 try {
@@ -51,10 +52,10 @@ var nextTick = (function () {
 function actionArray(actions, ix) {
     ix = ix || 0;
     var action = actions[ix];
-    if (action instanceof Function) {
-        return Array.prototype.slice.call(actions, ix);
-    } else {
+    if (action instanceof Array) {
         return action;
+    } else {
+        return Array.prototype.slice.call(actions, ix);
     }
 }
 
@@ -87,6 +88,7 @@ function IOError(M, error, input, success, failure) {
 
 // A basic orchestrator.
 var ExM = {
+    _api: IO,
     maxdepth: 50,
     depth: 0,
     nextTick: nextTick,
@@ -102,7 +104,7 @@ var ExM = {
             try {
                 action(M, input, success || M.drain, failure || M.drain);
             } catch (e) {
-                console.error(e);
+                console.error(util.inspect(e.stack, true, 0));
                 if (failure) {
                     try {
                         failure(M, new IOError(M, e, input, success, failure), M.drain, M.drain);
@@ -242,6 +244,8 @@ function autowrap(action) {
             default: 
                     throw "Unsupported action type";
         }
+    } else if (action instanceof Object) {
+        return wrapObj(action);
     } else {
         throw "BAD action type!";
     }
@@ -298,6 +302,25 @@ function wrapAsync2(action) {
     };
 }
 
+// Object with one key describing the method and the value being an array.
+function wrapObj(obj) {
+    return function (M, input, success, failure) {
+        M.call(autowrap(expandObj(M, obj)), input, success, failure);
+    };
+}
+
+function expandObj(M, obj) {
+    var k, v, a;
+    if (obj instanceof Object) {
+        for (k in obj) {
+            a = M._api[k];
+            v = obj[k];
+            return (v instanceof Array) ? a.apply(M._api, v) : a.call(M._api, v);
+        }
+    } else {
+        return obj;
+    }
+}
 
 // Some functions support providing a sequence of actions
 // as an array or a single action. autoseq normalizes 
@@ -338,6 +361,12 @@ IO.raise = function (err) {
     return function raise_(M, input, success, failure) {
         M.call(failure, new IOError(M, err, input, success, failure), M.drain, M.drain);
     };
+};
+
+// Discards the error and proceeds with the input provided
+// as though the error didn't occur.
+IO.forgive = function (M, err, success, failure) {
+    M.call(success, err.input, M.drain, failure);
 };
 
 // Tries the action first, and if it fails, passes
@@ -572,6 +601,34 @@ IO.timeout = function (ms, action, ontimeout) {
     };
 };
 
+// Returns an action that can be used in two places to sync up
+// their continuations. The "now" action will complete and continue
+// when at least N of "later" actions have been run, with N defaulting
+// to 1 when unspecified.
+IO.sync = function (N) {
+    var countDown = N || 1;
+    var followon;
+
+    return {
+        now: function sync_now_(M, input, success, failure) {
+            followon = function () { 
+                // One shot call.
+                if (--countDown <= 0) {
+                    followon = undefined;
+                    M.call(success, input, M.drain, failure); 
+                }
+            };
+        },
+
+        later: function sync_later_(M, input, success, failure) {
+            if (followon) {
+                followon();
+            }
+            M.call(success, input, M.drain, failure);
+        }
+    };
+};
+
 // Calls fn passing it the input flowing in sequence at that
 // point, discards its result or error, and proceeds as though
 // nothing happened.
@@ -662,7 +719,8 @@ function patternMatcher(fixed) {
 
 // Waits for given milliseconds to pass on control to the next action
 // in the sequence.
-IO.delay = function (ms) {
+IO.delay = function (secs) {
+    var ms = Math.round(secs * 1000);
     return function delay_(M, input, success, failure) {
         M.delay(ms, success, input, M.drain, failure);
     };
@@ -863,18 +921,19 @@ IO.Error = IOError;
 // that you can use to give a pause on each call.
 IO.Tracer = function (M) {
 
-    var T = Object.create(M || IO.Ex);
+    M = M || IO.Ex;
+    var T = Object.create(M);
 
     T.call = function (action, input, success, failure) {
         var M = this;
         if (M.depth++ < M.maxdepth) {
             try {
                 if (action.name && action.name.length > 0) {
-                    console.log("trace:\t" + action.name.replace("_", "") + '(' + JSON.stringify(input) + ')');
+                    console.log("trace:\t" + action.name.replace("_", "") + '(' + util.inspect(input, true, 0) + ')');
                 }
                 action(M, input, success || M.drain, failure || M.drain);
             } catch (e) {
-                console.error("trace:\t" + e.stack);
+                console.error("trace:\t" + e);
                 if (failure) {
                     try {
                         console.error("trace:\t" + failure.name + '(' + e + ')');
@@ -892,8 +951,9 @@ IO.Tracer = function (M) {
         }
     };
 
-    T.drain = function (M, input, success, failure) {
-        console.log("trace:\t\t" + JSON.stringify(input) + " => drain");
+    T.drain = function (_, input, success, failure) {
+        console.log("trace:\t\t" + util.inspect(input, true, 0) + " => drain");
+        M.drain(T, input, success, failure);
     };
 
 

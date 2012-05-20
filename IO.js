@@ -19,7 +19,6 @@
 
 // Trying to write an outer module structure that will work
 // for both in-browser usage and in Node.js.
-var util = require('util');
 var IO;
 
 try {
@@ -104,7 +103,7 @@ var ExM = {
             try {
                 action(M, input, success || M.drain, failure || M.drain);
             } catch (e) {
-                console.error(util.inspect(e.stack, true, 0));
+                console.error(e.stack);
                 if (failure) {
                     try {
                         failure(M, new IOError(M, e, input, success, failure), M.drain, M.drain);
@@ -929,7 +928,7 @@ IO.Tracer = function (M) {
         if (M.depth++ < M.maxdepth) {
             try {
                 if (action.name && action.name.length > 0) {
-                    console.log("trace:\t" + action.name.replace("_", "") + '(' + util.inspect(input, true, 0) + ')');
+                    console.log("trace:\t" + action.name.replace("_", "") + '(' + input + ')');
                 }
                 action(M, input, success || M.drain, failure || M.drain);
             } catch (e) {
@@ -952,7 +951,7 @@ IO.Tracer = function (M) {
     };
 
     T.drain = function (_, input, success, failure) {
-        console.log("trace:\t\t" + util.inspect(input, true, 0) + " => drain");
+        console.log("trace:\t\t" + input + " => drain");
         M.drain(T, input, success, failure);
     };
 

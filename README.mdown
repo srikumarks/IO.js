@@ -4,7 +4,7 @@
 This [infoq article] summarizes the state of the art in an interview conducted
 with the creators of the existing libraries for managing asynchronous
 operations in JS and features interviews with the creators of these libraries -
-[Step], [Flow-js], [node-promise], [Async], [Async.js], [FuturesJS] and
+[Do], [Step], [Flow-js], [node-promise], [Async], [Async.js], [FuturesJS] and
 [slide-flow-control]. What stands out is that most of them say relatively
 little on "error management". Here is also a [Hacker News thread] discussing
 Python creator Guido van Rossum's objections to a callback based API, based on
@@ -12,6 +12,7 @@ its poor ability to work with exceptions.
 
 [infoq article]: http://www.infoq.com/articles/surviving-asynchronous-programming-in-javascript
 [Hacker News thread]: http://news.ycombinator.com/item?id=3750817
+[Do]: https://github.com/creationix/do
 [Step]: https://github.com/creationix/step
 [Flow-js]: https://github.com/willconant/flow-js
 [node-promise]: https://github.com/kriszyp/node-promise

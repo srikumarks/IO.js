@@ -15,19 +15,13 @@
 // and IO.Tracer is the tracing executor that dumps info to the
 // console as the steps in an action execute.
 //
-// See IO.mdown for documentation and IO.tests.js for tests and examples.
+// See README.mdown for documentation and IO.tests.js for tests and examples.
 
-// Trying to write an outer module structure that will work
-// for both in-browser usage and in Node.js.
-var IO;
+// Wrapped in a package. The config is available in the package_registry
+// project so package.js would automatically know where to get IO from.
+package('com.nishabdam.IO', function () {
 
-try {
-    IO = exports || {};
-} catch (e) {
-    IO = {};
-}
-
-(function (IO) {
+var IO = this;
 
 IO.do = chain;
 IO.pass = pass;
@@ -37,8 +31,8 @@ IO.branch = function (action, success, failure) {
     return branch(autowrap(action), autowrap(success), autowrap(failure));
 };
 
-// action = fn input success failure
-
+// When in node.js, use the higher performance nextTick function.
+// Otherwise fall back to setTimeout.
 var nextTick = (function () {
     try {
         return process.nextTick;
@@ -93,7 +87,7 @@ var ExM = {
     nextTick: nextTick,
 
     // This is the core function where all the action happens.
-    // cont is an action function and if it throws an exception, 
+    // `action` is an action function and if it throws an exception, 
     // that is caught and propagated as a normal asynchonous error.
     // In order to not blow the stack, call occasionally makes
     // itself asynchronous.
@@ -124,7 +118,7 @@ var ExM = {
     drain: function (M, input, success, failure) {},
 
     // A simple wrapper to call, intended for users of the IO module.
-    // They shouldn't be using any other function.
+    // They shouldn't be using any other function to run an action.
     run: function (input, action) {
         this.call(autowrap(action), input, this.drain, this.drain);
     },
@@ -331,25 +325,34 @@ function autoseq(action) {
 // Turns an array of actions,  or actions given as arguments,
 // into a single action that runs each in sequence, piping the
 // output of each to the next.
-function chain(actions) {
-    return chain_impl(actionArray(arguments).map(autowrap));
-}
-
-function chain_impl(actions) {
+function chain(_actions) {
     // The simplest implementation is just this -
     //   actions.reduce(seq, pass)
     // but doing that can end up deeply nesting function
     // calls for long sequences, besides, it is not necessary
     // to eagerly compute all the continuations involved in
-    // a sequences before the sequence gets to run. It is
+    // a sequence before the sequence gets to run. It is
     // enough if we compute the continuations on the fly
-    // as the sequence executes.
-
+    // as the sequence executes. That incurs a bit of closure
+    // creation memory overhead, but that is needed for
+    // correctness of the generated continuations.
+    var actions = actionArray(arguments).map(autowrap);
     switch (actions.length) {
         case 0: return pass;
         case 1: return actions[0];
         default: return function (M, input, success, failure) {
-            M.call(actions[0], input, seq(chain_impl(actions.slice(1)), success), failure);
+            M.call(chain_iter(actions, 0, success), input, M.drain, failure);
+        }
+    }
+}
+
+// Private function for iterating through a sequence of actions.
+function chain_iter(actions, i, success) {
+    if (i >= actions.length) {
+        return success;
+    } else {
+        return function (M, input, _success, failure) {
+            M.call(actions[i], input, chain_iter(actions, i + 1, success), failure);
         };
     }
 }
@@ -976,5 +979,6 @@ IO.trace = function (actions) {
     };
 };
 
-}(IO));
+return IO;
 
+});

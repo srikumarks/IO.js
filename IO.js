@@ -721,8 +721,8 @@ function patternMatcher(fixed) {
 
 // Waits for given milliseconds to pass on control to the next action
 // in the sequence.
-IO.delay = function (secs) {
-    var ms = Math.round(secs * 1000);
+IO.delay = function (ms) {
+    ms = Math.round(ms);
     return function delay_(M, input, success, failure) {
         M.delay(ms, success, input, M.drain, failure);
     };

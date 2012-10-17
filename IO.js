@@ -894,7 +894,7 @@ IO.clock = function (period_ms, tickFn) {
 IO.log = function (msg, inputAlso) {
     return function log_(M, input, success, failure) {
         if (inputAlso) {
-            console.log(msg + JSON.stringify(input));
+            console.log(msg + defaultInspector(input));
         } else {
             console.log(msg);
         }

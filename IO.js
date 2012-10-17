@@ -913,6 +913,14 @@ IO.Error = IOError;
 //////////////////////
 // Tracer
 
+var defaultInspector = (function () {
+    try {
+        return require('util').inspect;
+    } catch (e) {
+        return JSON.stringify;
+    }
+}());
+
 // The tracing orchestrator will log all steps to the
 // console as they occur. Usage is exactly like IO.Ex.
 // It has an extra delay(ms) method (which returns IO.Tracer)
@@ -922,12 +930,14 @@ IO.Tracer = function (M) {
     M = M || IO.Ex;
     var T = Object.create(M);
 
+    T.inspect = defaultInspector;
+
     T.call = function (action, input, success, failure) {
         var M = this;
         if (M.depth++ < M.maxdepth) {
             try {
                 if (action.name && action.name.length > 0) {
-                    console.log("trace:\t" + action.name.replace("_", "") + '(' + input + ')');
+                    console.log("trace:\t" + action.name.replace("_", "") + '(' + T.inspect(input) + ')');
                 }
                 action(M, input, success || M.drain, failure || M.drain);
             } catch (e) {

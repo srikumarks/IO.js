@@ -433,6 +433,7 @@ IO.WebServer = function (port, wsOptions) {
 
     // Make a single link that triggers the action.
     function wslink(action, failure) {
+        action = IO.do(action);
         var root = this.input.request.url.root_url, path;
         if (action instanceof Function) {
             path = root + '/' + uniqueID();

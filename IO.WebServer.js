@@ -26,7 +26,7 @@ IO.WebServer = function (port, wsOptions) {
     // doesn't exist for "/a/b/hello".
     WS.route = function route_(path, action, recursive) {
         if (action) {
-            routes[path] = mkRoute(IO.finally(cleanupSessionLinks, action), path, path, recursive);
+            routes[path] = mkRoute(action, path, path, recursive);
         } else {
             delete routes[path];
         }
@@ -145,7 +145,9 @@ IO.WebServer = function (port, wsOptions) {
     // When a session expires, all the dynamic links will become
     // invalid. Passing false will cancel the currently active
     // timeout.
-    WS.expire = function (timeout_secs) {
+    WS.expire = function (timeout_secs, onexpired) {
+        onexpired = onexpired || sessionExpiredError;
+
         return function expire_(W, conn, succ, fail) {
             // Clear the previous timeout if any.
             if (W._timeout) {
@@ -161,7 +163,7 @@ IO.WebServer = function (port, wsOptions) {
                         delete routes[W._dynlinks[i]];
                     }
                     W._dynlinks.splice(0, W._dynlinks.length);
-                    W._expired = sessionExpiredError;
+                    W._expired = onexpired;
                 };
 
                 W._timeout = setTimeout(expireW, Math.ceil(timeout_secs) * 1000);
@@ -459,46 +461,6 @@ IO.WebServer = function (port, wsOptions) {
             return sha1.digest('hex');
         };
     }());
-
-    // Action: Removes all url values in the object
-    // from the route. The urls to expire come
-    // as input to this action, so you need to
-    // supply it via IO.run() or something.
-    // The urls array (or object) will also be passed further
-    // down the action chain to either the success
-    // or the failure branch. The action "fails" 
-    // if none of the urls in the array have been
-    // visited.
-    function linksVisited(W, urls, succ, fail) {
-        var r, unvisN = 0, N = 0;
-        for (var k in urls) {
-            r = routes[urls[k]];
-            if (r) {
-                ++N;
-                if (r.visited === 0) {
-                    ++unvisN;
-                }
-            }
-        }
-        if (N === unvisN) {
-            // Nothing visited. Fail this action.
-            W.call(IO.raise(urls), urls, succ, fail);
-        } else {
-            // Something visited. All is good.
-            W.call(succ, urls, W.drain, fail);
-        }
-    };
-
-    // Simple cleanup action.
-    function cleanupSessionLinks(W, input, succ, fail) {
-        var i, N;
-        for (i = 0, N = W._dynlinks.length; i < N; ++i) {
-            console.log("mopup: " + W._dynlinks[i]);
-            delete routes[W._dynlinks[i]];
-        }
-        W._dynlinks = [];
-        W.call(succ, input, W.drain, fail);
-    }
 
     function bindAction(action, W, failure) {
         action = IO.do(action);

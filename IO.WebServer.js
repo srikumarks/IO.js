@@ -452,13 +452,19 @@ IO.WebServer = function (port, wsOptions) {
     // occasion.
     var uniqueID = (function () {
         var crypto = require('crypto');
-        var salt = crypto.randomBytes(256);
+        var salt = (function () {
+            var b = crypto.randomBytes(256);
+            var sha1 = crypto.createHash('sha1');
+            sha1.update(b);
+            return sha1.digest('hex');
+        }());
         var id = 0;
+ 
         return function () {
             var sha1 = crypto.createHash('sha1');
             sha1.update(salt);
-            id += 1 + Math.random();
-            sha1.update('' + id);
+            sha1.update('/' + Date.now());
+            sha1.update('/' + (++id));
             return sha1.digest('hex');
         };
     }());

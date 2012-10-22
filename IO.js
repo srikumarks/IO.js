@@ -1022,6 +1022,86 @@ IO.trace = function (actions) {
     };
 };
 
+//////////////////////////////////////
+// Adapters
+//////////////////////////////////////
+
+// Node.js adapters
+var bslice = Array.prototype.slice;
+
+// Binds a module function for producing IO actions.
+//  var readFile = IO.nbind(fs, 'readFile');
+//  IO.run(null, readFile('/path/to/file.txt', 'r+', 0666));
+IO.nbind = nbind;
+function nbind(mod, funcName) {
+    var func = mod[funcName];
+    return function () {
+        var argv = bslice.call(arguments, 0);
+        var cbIx = argv.length;
+        argv.push(null);
+        console.assert(argv.length === cbIx + 1);
+        return function (M, input, succ, fail) {
+            argv[cbIx] = function (err) {
+                if (err) {
+                    M.call(fail, err, M.drain, M.drain);
+                } else {
+                    M.call(succ, bslice.call(arguments, 1), M.drain, fail);
+                }
+            };
+            func.apply(mod, argv);
+        };
+    };
+}
+
+// Special node async method invocation.
+//      IO.ninvoke(fs, 'readFile', path, flags)
+// .. produces an action to read the given file and 
+// passes the read information as an array to the next action.
+IO.ninvoke = ninvoke;
+function ninvoke(mod, funcName) {
+    return nbind(mod, funcName).apply(null, bslice.call(arguments, 2));
+}
+
+// Imports all the functions exposed in the module.
+//      var fs = IO.nimport(require('fs'));
+//      IO.run(null, fs.readFile('/path/file.txt', 'r+', 0666));
+IO.nimport = nimport;
+function nimport(mod) {
+    var nmod = {};
+    Object.keys(mod).forEach(function (funcName) {
+        var c = funcName.charAt(0);
+        var func = mod[funcName];
+        if (c === c.toLowerCase()) { 
+            // Function name.
+
+            // Bind the functions to make IO actions.
+            if (funcName.lastIndexOf('Sync') === funcName.length - 4) {
+                // Pass through the "Sync" functions.
+                nmod[funcName] = function () {
+                    return func.apply(mod, arguments);
+                };
+            } else {
+                // Turn the async functions into IO actions.
+                nmod[funcName] = nbind(mod, funcName);
+            }
+        } else {
+            // Pass through the "classes".
+            nmod[funcName] = function () {
+                return func.apply(mod, arguments);
+            };
+        }
+    });
+    return nmod;
+}
+
+// Import shortcut.
+//  var fs = IO.nrequire('fs');
+// is the same as -
+//  var fs = IO.nimport(require('fs'));
+IO.nrequire = nrequire;
+function nrequire(modName) {
+    return nimport(require(modName));
+}
 
 try {
     // Check whether we're in Node.js

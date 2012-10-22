@@ -118,7 +118,6 @@ var ExM = {
     _api: IO,
     maxdepth: 50,
     depth: 0,
-    nextTick: nextTick,
 
     // This is the core function where all the action happens.
     // `action` is an action function and if it throws an exception, 
@@ -141,7 +140,7 @@ var ExM = {
                 }
             }
         } else {
-            M.nextTick(function () {
+            nextTick(function () {
                 M.depth = Math.min(0, M.maxdepth - 1);
                 M.call(action, input, success, failure);
             });
@@ -159,7 +158,7 @@ var ExM = {
 
     delay: function (ms, action, input, success, failure) {
         var M = this;
-        (ms > 0 ? setTimeout : M.nextTick)(function () {
+        (ms > 0 ? setTimeout : nextTick)(function () {
             M.call(action, input, success, failure);
         }, ms);
     }
@@ -990,7 +989,7 @@ IO.Tracer = function (M) {
                 }
             }
         } else {
-            M.nextTick(function () {
+            nextTick(function () {
                 M.depth = Math.min(0, M.maxdepth - 1);
                 M.call(action, input, success, failure);
             });

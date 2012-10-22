@@ -61,11 +61,10 @@ var nextTick = (function () {
         };
     } else if (typeof Image !== 'undefined') {
         // Fast hack for not so modern browsers.
-        var badImgSrc = 'data:image/png,' + Math.random();
         return function (task) {
             var img = new Image();
             img.onerror = task;
-            img.src = badImgSrc;
+            img.src = 'data:image/png,' + Math.random();
         };
     } else {
         // Worst case.

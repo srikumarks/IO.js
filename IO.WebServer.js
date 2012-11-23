@@ -79,6 +79,9 @@ IO.WebServer = function (port, wsOptions) {
             reader.addListener('end', function () {
                 M.call(success, conn, M.drain, failure);
             });
+            reader.addListener('error', function (err) {
+                M.call(IO.raise(err), conn, M.drain, failure);
+            });
             reader.pipe(conn.response, {end: false});
         };
     };

@@ -1,3 +1,31 @@
+// Copyright © 2012 Srikumar K. S.
+// http://github.com/srikumarks/IO.js
+//
+// MIT License:
+// 
+// Permission is hereby granted, free of charge, to any person obtaining
+// a copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to
+// permit persons to whom the Software is furnished to do so, subject to
+// the following conditions:
+// 
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+// IO.WebServer provides basic web serving functionality for running
+// on Node.js.
+
 var http = require('http');
 var https = require('https');
 var URL = require('url');
@@ -39,10 +67,6 @@ IO.WebServer = function (port, wsOptions) {
     // mime_type: Give the mime type if you already know it.
     // encoding: Give the encoding if you already know it. Text is 
     //           assumed 'utf8' if you don't provide it.
-    // end: Boolean that indicates you want to write more data
-    //       to the response stream when it is set to true. If
-    //       set to false, the response stream is not passed further
-    //       down the action chain.
     WS.serveFile = function (path, options) {
         var mimeType = guessMimeType(path, options ? options.mime_type : false);
         var encoding = guessEncoding(mimeType, options ? options.encoding : false);
@@ -223,10 +247,11 @@ IO.WebServer = function (port, wsOptions) {
         if (!str) { return kvpairs; }
         str.split('&').forEach(function (kv) {
                     var kvarr = kv.split("=");
+                    var key = kvarr[0];
                     if (kvarr.length > 1) { 
-                        kvpairs[kvarr[0]] = decodeURIComponent(kvarr[1].replace(/\+/g,'%20'));
+                        kvpairs[key] = decodeURIComponent(kvarr[1].replace(/\+/g,'%20'));
                     } else if (kvarr.length > 0) {
-                        kvpairs[kvarr[0]] = true;
+                        kvpairs[key] = true;
                     }
                 });
         return kvpairs;
@@ -248,14 +273,14 @@ IO.WebServer = function (port, wsOptions) {
     }
 
     function runRouteAction(arg, route) {
-        wsrun(arg, logger ? IO.do(route.action, requestCompleted(id)) : route.action);
+        wsrun(arg, logger ? IO.do(route.action, requestCompleted(arg.id)) : route.action);
     }
 
     // Simple support for GET and POST requests.
     var methods = {
         'GET': function (id, request, response, route) {
             var data = splitFields(request.url.query);
-            runRouteAction({id: id, route: route, request: request, response: response, data: data}, route);
+            runRouteAction({id: id, route: route, request: request, response: response, raw_data: request.url.query, data: data}, route);
         },
 
         'POST': function (id, request, response, route) {

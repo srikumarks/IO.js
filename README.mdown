@@ -579,10 +579,118 @@ N defaults to 1 if you either leave it out or pass 0, since it makes no sense
 to make a "now" action that will never fire .. which is what N = 0 would have to
 mean.
 
+# IO.WebServer(port, options) #
 
+This is an experimental continuation based web server built atop `IO` for
+running in Node.js. For a simple example, see [the Arc challenge] written using
+`IO.WebServer`. The web server is loaded in Node.js like this -
+    
+    var IO = require('./path/to/IO.WebServer.js');
 
+You make a "web server instance" like this -
+    
+    var WS = IO.WebServer(8080);
 
+Following this, you setup the routes and actions using the `WS` object and finally
+start the web server using -
 
+    WS.start();
 
+If `options.key` and `options.cert` are set to the security credentials of the
+server, then the server uses `https`, otherwise it uses `http`. The `options`
+argument can be omitted. You can have multiple web server instances running on
+different ports.
 
+Once you setup routes, which are mappings between URLs and `IO` actions, the
+server will route `GET` and `POST` requests to the corresponding actions,
+passing a "connection" object to the action. The handler action uses the
+connection object to provide response material to the client.
+
+While `GET` requests are simple, the server collects form arguments for `POST`
+requests and makes them available as a dictionary in the `data` property of the
+connection object passed on as input to route actions.
+
+The connection object passed to handler actions has the following properties -
+
+- `.id` is the request id number.
+- `.route` is the route object. The main property of concern to the user are
+  `.route.path` which is the URL fragment.
+- `.request` is the Node.js http request object.
+- `.response` is the Node.js http response object to which the handler writes responses.
+- `.data` is, in the case of POST requests, a dictionary of form keys to decoded values.
+
+[the Arc challenge]: https://gist.github.com/3907030
+
+## WS.route(path, action, recursive) ##
+
+This adds a route that results in the given action (as in `IO` action) being
+triggered when a request for that route arrives. `recursive` being `true`
+indicates that this route mapping applies to all sub-routes if a more specific
+route entry isn't found. For recursive routes, the path must end in '/'.
+
+    WS.route('/greeting', WS.page(WS.write('Hello world!')));
+
+The "input" that is passed to the action is the Node.js connection object,
+so the receiving action can make use of any form values passed in.
+
+## WS.serveFile(path, options) ##
+
+An action that will serve up the file identified by the given local path.
+
+`options.mime_type` can be the MIME type of the file if you know it. Otherwise
+it will be guessed.
+
+`options.encoding` can be given if known. If unspecified, `utf8` is assumed
+for text files and binary for others.
+
+    WS.route('/logo.png', WS.serveFile('./static_files/artwork/logo.png'));
+
+## WS.serveDir(dir) ##
+
+Maps all sub-paths of the route URL to sub-paths of the given directory.
+
+## WS.serveURL(urlroot) ##
+
+Like `WS.serveFile` and `WS.serveDir` but pipes the contents of the given
+URL to the client.
+
+## WS.page(actions) ##
+
+Wraps actions that generate content for a given response page.
+
+    WS.route('/greet', WS.page(WS.write('Hello World!')));
+
+## WS.write(content) ##
+
+An action that writes the given content to the client connection.
+The `content` can be either a string or a `function (W, conn) -> String`,
+in which case the function will be called with the appropriate session
+object and client request information.
+
+## WS.expire(timeout_secs) ##
+
+Causes the current session to expire in `timeout_secs`. Session expiry
+condition is indicated by an `IO.raise('session_expired')` happening
+when a client request is being handled.
+
+## Dynamic links ##
+
+Inside an action, you can generate dynamic URLs bound to newly determined
+actions to continue with other steps that the client might take. The session
+object is simply the "orchestrator" active during the execution of any action
+sequence. This orchestrator (call it `W`) has a couple of methods for
+generating such dynamic links. The dynamic links generated are subject to the
+expiration setting specified using `WS.expire(timeout_secs)`.
+
+### W.link(action) ###
+
+Returns a URL which will result in the given action being run when a request is
+made to it.
+
+### W.links(name_action_map) ###
+
+Given a name-to-action map in the form of an object, returns an isomorphic
+object with the same names but whose values are URLs that will result in 
+those actions being triggered. The names are merely for programming 
+convenience and may be useful in template engines.
 

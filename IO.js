@@ -1,9 +1,28 @@
-// Copyright (c) 2012, Srikumar K. S.
-// All rights reserved.
+// Copyright © 2012 Srikumar K. S.
+// http://github.com/srikumarks/IO.js
 //
-// This software is available under the New BSD License
-// as described here - http://www.opensource.org/licenses/bsd-license.php
+// MIT License:
+// 
+// Permission is hereby granted, free of charge, to any person obtaining
+// a copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to
+// permit persons to whom the Software is furnished to do so, subject to
+// the following conditions:
+// 
+// The above copyright notice and this permission notice shall be
+// included in all copies or substantial portions of the Software.
+// 
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+//////////////////////////////////////////////////////////////////////////
 // IO is a library to help tame asynchronous code in Javascript.
 // The focus of IO is a) flexible error management, b) support for data
 // flow and c) customizability of the sequencing logic.
@@ -111,12 +130,29 @@ function IOError(M, error, input, success, failure) {
     this.failure = failure;
 }
 
+// An error value indicating to generators to pause generation
+// They call onresume with a callback function to be notified
+// of the stream resuming operations.
+function IOPauseCondition() {
+    this._resume_callbacks = [];
+}
+
+IOPauseCondition.prototype.onresume = function (callback) {
+    this._resume_callbacks.push(callback);
+};
+
+IOPauseCondition.prototype.resume = function () {
+    while (this._resume_callbacks.length > 0) {
+        this._resume_callbacks.pop()();
+    }
+};
 
 // A basic orchestrator.
 var ExM = {
     _api: IO,
     maxdepth: 50,
     depth: 0,
+    kBufferCapacity: 8,
 
     // This is the core function where all the action happens.
     // `action` is an action function and if it throws an exception, 
@@ -819,6 +855,160 @@ IO.reduce = function (reductionFn, initialValue) {
     };
 };
 
+// A value generator. The gen() function is expected to
+// return a sequence of values every time it is called,
+// and 'undefined' for end of the sequence. The generator
+// captures PauseCondition and pauses/resumes automatically.
+IO.gen = function (gen, delay_ms) {
+    var paused = false;
+    delay_ms = delay_ms || 0;
+
+    function genOne_(M, input, success, failure) {
+        if (!paused) {
+            var value = gen();
+            if (value !== undefined) {
+                M.call(success, value, M.drain, failure);
+                if (!paused) {
+                    M.delay(delay_ms, genOne_, input, success, failure);
+                }
+            }
+        }
+    }
+
+
+    function gen_(M, input, success, failure) {
+        var catcher = IO.catch(function (error, resume, giveup) {
+            if (error instanceof IOPauseCondition) {
+                if (!paused) {
+                    paused = true;
+                    if (error.onresume) {
+                        error.onresume(function () {
+                            paused = false;
+                            M.call(gen_, input, success, failure);
+                        });
+                    }
+                }
+            } else {
+                giveup(error);
+            }
+        });
+
+        M.call(seq(catcher, genOne_), input, success, failure);
+    }
+
+    return gen_;
+};
+
+// An action useful to "pause" generators forever.
+IO.pause = function (M, input, success, failure) {
+    M.call(failure, new IOPauseCondition(), M.drain, M.drain);
+};
+
+// Triggers the following actions once for each value in the array.
+// The order of execution is not guaranteed to be the same as the
+// array element order. If you want the same order of execution,
+// just wrap the rest in an IO.atomic or IO.pipeline as desired.
+//
+// If no array argument is given, then the input will be sprayed.
+IO.spray = function (array) {
+    function gen(array) {
+        var i = 0;
+        return function array_enumerator_() {
+            if (i < array.length) {
+                return array[i++];
+            } else {
+                return undefined;
+            }
+        };
+    }
+
+    return function (M, input, success, failure) {
+        M.call(IO.gen(gen(array || input)), input, success, failure);
+    };
+};
+
+// Triggers the following actions once for each value in the array.
+// The order of execution is not guaranteed to be the same as the
+// array element order. If you want the same order of execution,
+// just wrap the rest in an IO.atomic or IO.pipeline as desired.
+//
+// If no array argument is given, then the input will be sprayed.
+IO.cycle = function (array) {
+    function gen(array) {
+        var i = 0;
+        return function array_enumerator_() {
+            var j = i % array.length;
+            i = (i + 1) % array.length;
+            return array[j];
+        };
+    }
+
+    return function (M, input, success, failure) {
+        M.call(IO.gen(gen(array || input)), input, success, failure);
+    };
+};
+
+
+// Generates a numeric sequence starting from `from`,
+// incrementing by `step` until `to` is reached. If
+// `to` is not specified, then the sequence is infinite.
+// `from` and `step` default to 0 and 1 respectively.
+IO.enumFrom = function (from, step, to) {
+    from = from || 0;
+    step = step || 1;
+
+    var gen = (function () {
+        if (to === undefined) {
+            return function () {
+                var i = from;
+                return function (j) { return (j = i, i += step, j); };
+            };
+        } else if (step > 0) {
+            return function () {
+                var i = from;
+                return function (j) { return i < to ? (j = i, i += step, j) : undefined; };
+            };
+        } else if (step < 0) {
+            return function () {
+                var i = from;
+                return function (j) { return i > to ? (j = i, i += step, j) : undefined; };
+            };
+        }
+    }());
+
+    return function (M, input, success, failure) {
+        M.call(IO.gen(gen()), input, success, failure);
+    };
+};
+
+// Collects in-flowing values into an array. Continues
+// the sequence passing the collected array every time an
+// item is received. If you pass a test function, it will 
+IO.collectUntil = function (test) {
+    var acc = [];
+
+    if (test) {
+        return function (M, input, success, failure) {
+            if (test(input)) {
+                M.call(M.drain, acc, M.drain, failure);
+            } else {                
+                acc.push(input);
+                M.call(success, acc, M.drain, failure);
+            }
+        };
+    } else {
+        return function (M, input, success, failure) {
+            if (input === undefined) {
+                M.call(M.drain, acc, M.drain, failure);
+            } else {
+                acc.push(input);
+                M.call(success, acc, M.drain, failure);
+            }
+        };
+    }
+};
+
+
 // Turns the action into a "FIFO" pipe, forcing all invocations
 // to process inputs in serial order. This could be useful in
 // a variety of circumstances where you don't want the intermediate
@@ -828,11 +1018,16 @@ IO.atomic = function (action) {
 
     var arr = [];
     var busy = false;
+    var pauseStream;
 
     function doit(M, input, succ, fail) {
         if (!busy) {
             busy = true;
             M.call(seq(action, done), input, succ, fail);
+        } else if (M.kBufferCapacity && arr.length + 1 >= M.kBufferCapacity) {
+            arr.push([input, succ, fail]);
+            pauseStream = pauseStream || new IOPauseCondition();
+            M.call(fail, pauseStream, M.drain, M.drain);
         } else {
             arr.push([input, succ, fail]);
         }
@@ -842,6 +1037,11 @@ IO.atomic = function (action) {
         if (arr.length > 0) {
             var x = arr.shift();
             M.call(seq(action, done), x[0], x[1], x[2]);
+            if (pauseStream && arr.length < M.kBufferCapacity) {
+                var s = pauseStream;
+                pauseStream = undefined;
+                s.resume();
+            }
         } else {
             busy = false;
         }
@@ -944,7 +1144,11 @@ IO.log = function (msg, inputAlso) {
 IO.Ex = ExM;
 
 // The error class is exposed.
-IO.Error = IOError;
+IO.Error = IOError; // A recoverable error.
+IO.PauseCondition = IOPauseCondition;   // A non-resumable condition
+                                        // raised primarily to pause
+                                        // generators. Other handlers
+                                        // may ignore and propagate it.
 
 //////////////////////
 // Tracer

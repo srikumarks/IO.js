@@ -72,17 +72,26 @@ IO.WebServer = function (port, wsOptions) {
         var encoding = guessEncoding(mimeType, options ? options.encoding : false);
 
         return function serveFile_(M, conn, success, failure) {
-            if (mimeType) {
-                conn.response.writeHead(200, {'Content-Type': mimeType});
-            }
-            var reader = fs.createReadStream(path, encoding ? {encoding: encoding} : {});
-            reader.addListener('end', function () {
-                M.call(success, conn, M.drain, failure);
+            // It might appear as though the exists test can be done outside
+            // of this closure, but it is advantageous to do it inside in case
+            // the file gets created after the server starts.
+            fs.exists(path, function (exists) {
+                if (exists) {
+                    if (mimeType) {
+                        conn.response.writeHead(200, {'Content-Type': mimeType});
+                    }
+                    var reader = fs.createReadStream(path, encoding ? {encoding: encoding} : {});
+                    reader.addListener('end', function () {
+                        M.call(success, conn, M.drain, failure);
+                    });
+                    reader.addListener('error', function (err) {
+                        M.call(IO.raise(err), conn, M.drain, failure);
+                    });
+                    reader.pipe(conn.response, {end: false});
+                } else {
+                    M.call(IO.raise('path not found'), conn, M.drain, failure);
+                }
             });
-            reader.addListener('error', function (err) {
-                M.call(IO.raise(err), conn, M.drain, failure);
-            });
-            reader.pipe(conn.response, {end: false});
         };
     };
 

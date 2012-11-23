@@ -311,6 +311,55 @@ passed as a zero-argument function, so that it can be restarted if necessary.
 Note that this is a weak timeout, in the sense that the action is not aborted.
 Only the continuation is aborted.
 
+## IO.gen(generatorFunc, delay_ms = 0) ##
+
+An action that will run the following continuation with the values produced by
+`generatorFunc` until it returns `undefined`. It will wait for `delay_ms`
+between the invocations.
+
+This action is called a "generator". It will pause when it detects an
+`IO.PauseCondition` being raised in the actions that follow. The entity
+responsible for raising the condition can subsequently resume the generator
+when the time comes. `IO.atomic` is one such action that can raise an
+`IO.PauseCondition`.
+
+## IO.pause ##
+
+An action that will forever pause any generators driving the action sequence
+that it is a part of. It is called `IO.pause` because it raises an
+`IO.PauseCondition`.
+
+## IO.spray(array) ##
+
+A generator that enumerates the array and sends its values down the action
+chain. The array argument is optional. If omitted, then the input is expected
+to be an array to enumerate.
+
+    IO.run(["hello", "world"], IO.do(IO.spray, IO.log("-> ", true)));
+    // will produce
+    -> 'hello'
+    -> 'world'
+
+## IO.cycle(array) ##
+
+Similar to `IO.spray`, except that it cyclically enumerates the array
+forever. The array argument is optional. If omitted, then the input is
+expected to be an array to enumerate.
+
+## IO.enumFrom(from, step, to) ##
+
+A generator that sends number sequences down the chain. The sequence values are
+`from <= i < to` stepping by `step`. If `to` is omitted, the sequence
+increments or decrements according to `step` forever.  If `step` is omitted, it
+defaults to `1`. If `from` is omitted, it defaults to `0`.
+
+## IO.collectUntil(test) ##
+
+Accumuates the input that arrives into an array, sending the array out every
+time a new value is added. The collection terminates when the input satisfies
+the given test function (`function (input) -> Boolean`). If no test function is
+given, then the collection will terminate when the input is `undefined`.
+
 ## IO.atomic(action) ##
 
 Builds an action that makes the given action operate "atomically".  In other
@@ -324,6 +373,14 @@ close database" kind of actions.
     IO.atomic(a1, a2, ...)
     IO.atomic([a1, a2, ...])
         = IO.atomic(IO.do(a1, a2, ...))
+
+> *Note* : `IO.atomic` maintains a finite sized buffer of processing requests.
+> Once the buffer gets full, it raises an `IO.PauseCondition` that are trapped
+> by generators (`IO.gen` and ilk) that pump requests to the atomic action.
+> Once buffer space is available, the paused generators will be resumed. All
+> this is usually transparent to you. You need to be aware of it if you're
+> continuously driving atomic actions using `IO.run`, in which case you need to
+> put in an appropriate handler for `IO.PauseCondition`.
 
 ## IO.pipeline(actions) ##
 
@@ -522,24 +579,10 @@ N defaults to 1 if you either leave it out or pass 0, since it makes no sense
 to make a "now" action that will never fire .. which is what N = 0 would have to
 mean.
 
-# Utilities #
 
-## IO.util ##
 
-This namespace contains a bunch of utilty functions that make composeable
-actions for use elsewhere.
 
-### IO.util.notify(delegate, selector, ...) ###
 
-Calls `delegate[selector](...)` without affecting the flow at this point.
-Useful for asynchronous notifications.
 
-## (TODO) IO.browser ##
 
-This namespace contains some utilities for browser-side IO.
 
-### IO.browser.initFileSystemAPI(storageQuota_MB) => fs ###
-### IO.browser.fetchURL(url, responseType) => {url: url, data: data} ###
-### IO.browser.getFileEntry(fs, absPath) => FileEntry ###
-### IO.browser.saveFile(fs, absPath, data) ###
-### IO.browser.loadFile(fs, absPath) => {path: absPath, data: result} ###

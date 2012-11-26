@@ -22,7 +22,7 @@
 // Run using - node arc.js
 // Then visit http://localhost:9000/said in your browser.
 
-var IO = require('../lib/IO.WebServer.js');
+var IO = require('../src/IO.WebServer.js');
 
 var ws = IO.WebServer(9000);
 

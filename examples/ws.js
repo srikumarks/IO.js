@@ -9,7 +9,7 @@
 // Notes: 
 //  Doesn't do directory listings. You need to know your file name.
 
-var IO = require('../lib/IO.WebServer.js');
+var IO = require('../src/IO.WebServer.js');
 var ws = IO.WebServer(9000);
 
 var reportInvalidURL = IO.cond([

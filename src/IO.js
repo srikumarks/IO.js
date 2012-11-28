@@ -796,6 +796,25 @@ IO.delay = function (ms) {
     };
 };
 
+// Debounces invocations of the following sequence.
+// If requests keep coming in within the given "ms" interval,
+// then the following actions will keep getting delayed
+// until there is a grace period of at least "ms" milliseconds
+// between requests.
+IO.debounce = function (ms) {
+    var lastRequestTime = Date.now();
+    var lastRequestTimer;
+
+    return function debounce_(M, input, success, failure) {
+        var thisRequestTime = Date.now();
+        if (lastRequestTimer && thisRequestTime - lastRequestTime < ms) {
+            cancelTimeout(lastRequestTimer);
+        }
+
+        lastRequestTimer = setTimeout(function () { M.call(success, input, M.drain, failure); }, ms);
+        lastRequestTime = thisRequestTime;
+    };
+};
 
 function copyKeys(from, to) {
     var keys = Object.keys(from);

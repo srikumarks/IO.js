@@ -1,27 +1,28 @@
 
-(function (config) {
-    var IO = config.IO;
+console.assert(IO);
+
+(function (Browser) {
 
     //////////////////////////////////////
     // Binding UI elements to IO actions.
 
     // 'on' associates an action with an event generated
-    // by a GUI element. Use the IO.off action within
-    // the action sequence to dissociate the action from 
+    // by a GUI element. Use the IO.Browser.off action within
+    // the triggered action sequence to dissociate the action from 
     // the GUI element.
     //
     // Ex:
-    //      IO.on('sendButton', 'click', IO.log('button clicked'));
+    //      IO.Browser.on('sendButton', 'click', IO.log('button clicked'));
     //
     //      // One-time action
-    //      IO.on('sendButton', 'click', IO.do([
+    //      IO.Browser.on('sendButton', 'click', IO.do([
     //          IO.log('Rocket launched .. won't happen again!'),
-    //          IO.off
+    //          IO.Browser.off
     //          ]));
     //
     //      // html
     //      <button id="sendButton">Send</button>
-    IO.on = function (element, eventName, action) {
+    Browser.on = function (element, eventName, action) {
         if (typeof element === 'string') {
             // Use getElementById to resolve. Works only in a browser.
             element = document.getElementById(element);
@@ -67,7 +68,7 @@
 
     // When run within an action sequence bound to a UI element,
     // this will dissociate the action from it.
-    IO.off = function (Ex, input, success, failure) {
+    Browser.off = function (Ex, input, success, failure) {
         console.assert(Ex.off);
         Ex.off();
         Ex.call(success, input, Ex.drain, failure);
@@ -93,12 +94,12 @@
     // Ex:
     //      IO.run('start', IO.do([
     //          IO.clock(1000),
-    //          IO.show('counter', 'innerText')
+    //          IO.Browser.show('counter', 'innerText')
     //      ]));
     //
     //      <span id='counter'></span>
     //
-    IO.show = function (element, setter, formatter) {
+    Browser.show = function (element, setter, formatter) {
         if (typeof element === 'string') {
             // Use getElementById to resolve. Works only in a browser.
             element = document.getElementById(element);
@@ -173,18 +174,33 @@
         }
     };
 
-    config.export(IO);
-}((function () {
-    if (typeof window !== 'undefined' && typeof document !== 'undefined' && this === window) {
-        // In browser.
-        console.assert(window.IO); // Must've loaded the IO.js script already.
-        return {IO: window.IO, export: function (IO) { window.IO = IO; }};
-    }
+    // IO.Browser.get('url://somewhere/something', undefined, 'responseText')
+    //
+    // Will fetch the URL and pass the contents to the next stage.
+    // Simple wrapper fro XMLHttpRequest.
+    Browser.get = function (url, responseType, responseKey) {
+        return function (M, input, success, failure) {
+            var request = new XMLHttpRequest();
+            var thisResponseKey = responseKey;
+            request.open('GET', url, true);
+            if (responseType) {
+                request.responseType = responseType;
+                thisResponseKey = thisResponseKey || 'response';
+            }
+            thisResponseKey = thisResponseKey || 'responseText';
+            request.onload = function () {
+                var response = request[thisResponseKey];
+                if (response) {
+                    M.call(success, response, M.drain, failure);
+                } else {
+                    request.onerror();
+                }
+            };
+            request.onerror = function () {
+                M.call(IO.raise('XMLHttpRequestFailed', url, responseType, thisResponseKey), input, success, failure);
+            };
+            request.send();
+        };
+    };
+}(IO.Browser = {}));
 
-    if (typeof module !== 'undefined') {
-        // In Node.js
-        return {IO: require('./IO.js'), export: function (IO) { module.exports = IO; }};
-    }
-
-    console.assert(false); // Unknown environment.
-}())));

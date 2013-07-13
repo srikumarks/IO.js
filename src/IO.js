@@ -1070,6 +1070,10 @@ IO.atomic = function (action) {
     return doit;
 };
 
+function mappableAtomic(action) {
+    return IO.atomic(action);
+}
+
 // IO.pipeline(a1, a2, ...)
 //  = IO.pipeline([a1, a2, ...]) 
 //  = IO.do([a1, a2, ...].map(IO.atomic))
@@ -1082,7 +1086,7 @@ IO.atomic = function (action) {
 // In such cases, the host action sequences will only receive the output
 // corresponding to the inputs that they sent and not those by any other.
 IO.pipeline = function (actions) {
-    return IO.do(actionArray(arguments).map(IO.atomic));
+    return IO.do(actionArray(arguments).map(mappableAtomic));
 };
 
 // Makes a clock action that behaves as follows -

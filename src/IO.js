@@ -878,15 +878,25 @@ IO.reduce = function (reductionFn, initialValue) {
 // captures PauseCondition and pauses/resumes automatically.
 IO.gen = function (gen, delay_ms) {
     var paused = false;
+    var genCount = 0;
     delay_ms = delay_ms || 0;
 
     function genOne_(M, input, success, failure) {
+        if (genCount === 0) {
+            genCount = M.kBufferCapacity;
+        }
+
         if (!paused) {
             var value = gen();
+            --genCount;
             if (value !== undefined) {
                 M.call(success, value, M.drain, failure);
                 if (!paused) {
-                    M.delay(delay_ms, genOne_, input, success, failure);
+                    if (genCount === 0) {
+                        M.delay(delay_ms, genOne_, input, success, failure);
+                    } else {
+                        genOne_(M, input, success, failure);
+                    }
                 }
             }
         }

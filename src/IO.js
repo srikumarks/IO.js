@@ -856,9 +856,7 @@ IO.map = function (fn) {
 // that satisfy the given predicate.
 IO.filter = function (pred) {
     return function filter_(M, input, success, failure) {
-        if (pred(input)) {
-            M.call(success, input, M.drain, failure);
-        }
+        M.call(pred(input) ? success : pass, input, M.drain, failure);
     };
 };
 

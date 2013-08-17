@@ -178,29 +178,46 @@ console.assert(IO);
     //
     // Will fetch the URL and pass the contents to the next stage.
     // Simple wrapper fro XMLHttpRequest.
+    //
+    // The returned action has a property named 'interrupt'. This is an
+    // action which when run will cause the sequence (and the orchestrator
+    // that's running it) executing the get action to abort with the 
+    // 'interrupted' condition. This uses IO.interruptible. Note that
+    // the interrupt action can be run within any orchestrator.
     Browser.get = function (url, responseType, responseKey) {
-        return function (M, input, success, failure) {
-            var request = new XMLHttpRequest();
-            var thisResponseKey = responseKey;
-            request.open('GET', url, true);
-            if (responseType) {
-                request.responseType = responseType;
-                thisResponseKey = thisResponseKey || 'response';
-            }
-            thisResponseKey = thisResponseKey || 'responseText';
-            request.onload = function () {
-                var response = request[thisResponseKey];
-                if (response) {
-                    M.call(success, response, M.drain, failure);
-                } else {
-                    request.onerror();
+        return IO.interruptible(function (oninterrupt) {
+            return function xmlhttprequest_(M, input, success, failure) {
+                var request = new XMLHttpRequest();
+                var thisResponseKey = responseKey;
+                var done = false;
+                request.open('GET', url, true);
+                if (responseType) {
+                    request.responseType = responseType;
+                    thisResponseKey = thisResponseKey || 'response';
                 }
+                thisResponseKey = thisResponseKey || 'responseText';
+                request.onload = function () {
+                    var response = request[thisResponseKey];
+                    done = true;
+                    if (response) {
+                        M.call(success, response, M.drain, failure);
+                    } else {
+                        request.onerror();
+                    }
+                };
+                request.onerror = function () {
+                    done = true;
+                    M.call(IO.raise('XMLHttpRequestFailed', url, responseType, thisResponseKey), input, success, failure);
+                };
+                oninterrupt(function () {
+                    if (!done) {
+                        request.abort();
+                        M.delay(0, IO.raise('interrupted'), {reason: 'XMLHttpRequestInterrupted', input: input}, success, failure);
+                    }
+                });
+                request.send();
             };
-            request.onerror = function () {
-                M.call(IO.raise('XMLHttpRequestFailed', url, responseType, thisResponseKey), input, success, failure);
-            };
-            request.send();
-        };
+        });
     };
 }(IO.Browser = {}));
 

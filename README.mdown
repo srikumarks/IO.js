@@ -338,6 +338,22 @@ Here is a silly example -
     IO.run('start', A);
     IO.run('stop', B);
 
+## IO.interruptible(func) ##
+
+Given a `function (oninterrupt) -> action`, produces an action that can
+be interrupted when it is running. The result action is given a property
+called `interrupt`, which is an action that can be executed in any sequence
+to interrupt the result action when it is running. 
+
+`oninterrupt` is a function of type `function (handler) -> void`, where
+handler is a zero-argument procedure that should be called when the 
+result action is interrupted.
+
+For example, `IO.Browser.get` produces such an interruptible action.
+In general, `IO.interruptible` is intended for wrapping such low level
+async routines such as `XMLHttpRequest`. Actions composed using `IO` 
+are better dealt with using `IO.try`, `IO.finally` and `IO.catch`.
+
 ## IO.timeout(ms, action, ontimeout) ##
 
 Makes an action that couples the given action with a watchdog timer.  If the

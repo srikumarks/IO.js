@@ -433,6 +433,80 @@ IO.raise = function (err) {
     };
 };
 
+// The argument 'interruptible' is a function (oninterrupt) that is expected to
+// return an action that needs to be made interruptible.  'oninterrupt' is a
+// function (handler) that installs the given zero-argument handler to be
+// called upon interruption. The resultant action is given an addition property
+// named 'interrupt' which is an action to be used to interrupt the original
+// action irrespective of which orchestrator is running it.
+//
+// This is intended for use by low level constructs that may have different
+// mechanisms for interruption. Whenever IO.raise can be used, IO.finally is
+// likely to be adequate as a mechanism for installing cleanup actions.
+IO.interruptible = function (interruptible) {
+    var interrupt = cont;
+
+    function oninterrupt(handler) {
+        // Install the interrupt handler. This is basically
+        // some zero-argument procedure to run when an interruption 
+        // occurs.
+        interrupt = (function (oldInterrupt) {
+            return function (M, input, success, failure) {
+                handler();
+                M.call(oldInterrupt, input, success, failure);
+            };
+        }(interrupt));
+    }
+
+    var action = interruptible(oninterrupt);
+
+    // This wrapper basically delays looking up the 'interrupt'
+    // variable until the time it is required.
+    action.interrupt = function interrupt_(M, input, success, failure) {
+        M.call(interrupt, input, success, failure);
+    };
+
+    return action;
+};
+
+// A general mechanism for interrupting an arbitrary sequence.  You first call
+// IO.interruption(reason) to make two actions - 'mark' and 'interrupt'. 
+//
+// The 'mark' action can be used in any sequence to mark the fact that an
+// interruption can be raised in that sequence even when it is suspended on
+// some other action.  In such cases, IO.finally or IO.catch can be used to
+// trap the generated 'interrupted' condition and take appropriate action.
+//
+// The 'interrupt' action can be used in any sequence to interrupt all of the
+// other sequences that have been 'mark'ed.
+//
+// Note that the 'interrupt' and 'mark' actions can be part of different
+// sequences that are running in different orchestrators. In fact, this is
+// pretty much the point of this. However, they both can also be part of the
+// same sequence as well.
+IO.interruption = function (reason) {
+    var handlers = {};
+    var newid = 0;
+
+    return {
+        mark: function (M, input, success, failure) {
+            var id = ++newid;
+            handlers[id] = function () {
+                delete handlers[id];
+                M.delay(0, IO.raise('interrupted'), {reason: reason, input: input}, success, failure);
+            };
+            M.call(success, input, M.drain, failure);
+        },
+        interrupt: function (M, input, success, failure) {
+            var keys = Object.keys(handlers);
+            for (var i = 0; i < keys.length; ++i) {
+                handlers[keys[i]]();
+            }
+            M.call(success, input, M.drain, failure);
+        }
+    };
+};
+
 // Discards the error and proceeds with the input provided
 // as though the error didn't occur.
 IO.forgive = function (M, err, success, failure) {

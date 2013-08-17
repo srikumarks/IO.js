@@ -301,6 +301,43 @@ back again, do this -
 
     IO.tee(IO.fork([a1, a2, ...]))
 
+## IO.chan() ##
+
+Makes a CSP-style channel that can be used to communicate between 
+two asynchronous sequences that may potentially be running within two 
+different orchestrators. The return value is an object with two
+properties named 'send' and 'recv' which are themselves actions.
+The 'send' action will send its input to receivers. Usually, there
+should only be one receiver per channel, but if there are many, then
+the order in which the data sent through send will be delivered to
+them is unspecified.
+
+Here is a silly example -
+
+    var c = IO.chan();
+    var A = IO.do([
+        IO.log('A1'),
+        IO.delay(5000),
+        IO.log('A2'),
+        IO.supply('hello'),
+        c.send,
+        IO.delay(1000),
+        IO.log('A3'),
+        c.recv,
+        IO.log('A4', true)
+    ]);
+    var B = IO.do([
+        IO.log('B1'),
+        c.recv,
+        IO.log('B2', true),
+        IO.delay(2000),
+        IO.log('B3'),
+        IO.supply('greetings'),
+        c.send
+    ]);
+    IO.run('start', A);
+    IO.run('stop', B);
+
 ## IO.timeout(ms, action, ontimeout) ##
 
 Makes an action that couples the given action with a watchdog timer.  If the

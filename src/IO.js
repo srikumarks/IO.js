@@ -197,7 +197,7 @@ var ExM = {
             M.call(action, input, success, failure);
         }, ms);
     }
-}
+};
 
 // Starts the "success" continuation.
 function pass(M, input, success, failure) {
@@ -638,6 +638,7 @@ function bindInput(input, action) {
 // sequences of its own. If you wish the cleanup action to happen
 // in parallel with the rest of the code, just wrap it in an IO.tee().
 IO.finally = function (cleanup, action) {
+    cleanup = autowrap(cleanup);
     action = autoseq(action);
 
     return function finally_(M, input, success, failure) {

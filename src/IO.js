@@ -1110,6 +1110,41 @@ IO.collectUntil = function (test) {
     }
 };
 
+// Makes a new "channel" that can be used to communicate between two
+// sequences running in different orchestrators or forks. The channel
+// has two fields named 'send' and 'recv' which are actions that can
+// be inserted into any sequence to achieve the necessary coordination.
+IO.chan = function () {
+    var waiters = [];
+    var queue = [];
+    
+    function flush() {
+        var count = 0;
+        while (queue.length > 0 && waiters.length > 0) {
+            waiters.shift()(queue.shift());
+            ++count;
+        }
+        return count;
+    }
+
+    return {
+        send: function send_chan(M, input, success, failure) {
+            queue.push(input);
+            flush();
+            M.call(success, input, M.drain, failure);
+        },
+        recv: function recv_chan(M, input, success, failure) {
+            flush();
+            if (queue.length === 0) {
+                waiters.push(function (data) {
+                    M.delay(0, success, data, M.drain, failure);
+                });
+            } else {
+                M.call(success, queue.shift(), M.drain, failure);
+            }
+        }
+    };
+};
 
 // Turns the action into a "FIFO" pipe, forcing all invocations
 // to process inputs in serial order. This could be useful in
